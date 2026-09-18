@@ -23,6 +23,7 @@ import java.util.HexFormat;
 @Service
 public class SessionServiceImpl implements SessionService {
 
+    /** 以 Redis 字符串读写用户 ID，不序列化完整用户对象。 */
     private final StringRedisTemplate redisTemplate;
 
     /**
@@ -35,6 +36,10 @@ public class SessionServiceImpl implements SessionService {
      */
     private final Duration sessionTtl;
 
+    /**
+     * 注入 Redis 客户端及固定会话有效期，单位为秒，缺省为 7200。
+     * <p>当前构造器未校验正数范围，运行配置应提供有效的正数。
+     */
     public SessionServiceImpl(
             StringRedisTemplate redisTemplate,
             @Value("${app.session.ttl-seconds:7200}") long ttlSeconds) {
@@ -48,9 +53,12 @@ public class SessionServiceImpl implements SessionService {
      *
      * <p>返回原始 Token 给客户端，
      * Redis 中只保存 Token 的 SHA-256 哈希对应的 Session。
+     * @param userId 已通过密码认证的数据库用户 ID
+     * @return 可供客户端后续放入 Authorization 请求头的原始令牌
      */
     @Override
     public String createSession(long userId) {
+        // 32 个随机字节提供 256 位随机性；无填充的 URL 安全 Base64 编码为 43 个字符。
         byte[] randomBytes = new byte[32];
         secureRandom.nextBytes(randomBytes);
 
@@ -60,6 +68,7 @@ public class SessionServiceImpl implements SessionService {
 
         String key = RedisKeys.session(sha256(token));
 
+        // 同一次写入设置值和过期时间，值为十进制用户 ID 字符串，读取时不滑动续期。
         redisTemplate.opsForValue().set(
                 key,
                 String.valueOf(userId),
@@ -72,6 +81,7 @@ public class SessionServiceImpl implements SessionService {
     /**
      * 根据客户端提交的原始 Token 查询登录用户 ID。
      *
+     * @param token 客户端持有的原始令牌
      * @return Session 不存在或已经过期时返回 null
      */
     @Override
@@ -84,11 +94,14 @@ public class SessionServiceImpl implements SessionService {
             return null;
         }
 
+        // 当前实现要求存储值可解析为 Long；损坏的值会抛出异常，而不会被视为合法身份。
         return Long.valueOf(userId);
     }
 
     /**
      * 删除当前 Token 对应的 Session，用于退出登录。
+     * <p>不检查删除数量，键已过期或已删除时也正常完成；Redis 访问失败则向上传递异常。
+     * @param token 当前请求使用的原始令牌
      */
     @Override
     public void deleteSession(String token) {
@@ -99,6 +112,8 @@ public class SessionServiceImpl implements SessionService {
     /**
      * 对原始 Token 进行 SHA-256 哈希，
      * 避免直接把可用于登录的 Token 存入 Redis Key。
+     * @param value 使用 UTF-8 编码的原始令牌
+     * @return 64 位小写十六进制摘要，用于定位会话键
      */
     private String sha256(String value) {
         try {

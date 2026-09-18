@@ -16,6 +16,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     private final AuthInterceptor authInterceptor;
 
+    /** 复用容器中的认证拦截器，避免自行创建会话服务或维护登录状态。 */
     public WebMvcConfig(AuthInterceptor authInterceptor) {
         this.authInterceptor = authInterceptor;
     }
@@ -24,7 +25,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
      * 注册认证拦截器。
      *
      * <p>所有 /api/v1/** 接口默认要求登录，
-     * 仅显式排除登录接口。
+     * 仅显式排除登录接口，当前用户查询和登出仍须认证。
+     * <p>这里未配置跨域规则，也未针对 OPTIONS 预检请求作单独处理。
+     * @param registry Spring MVC 提供的拦截器注册表
      */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {

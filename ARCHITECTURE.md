@@ -2,7 +2,7 @@
 
 ## 1. 设计状态与依据
 
-本文件用于约束后续实现。当前尚未进入业务代码实现阶段；后续开发应遵循根目录 `AGENTS.md`、本文件及 `docs/` 下的需求、数据、API、计划和测试文档。
+本文件同时说明当前实现和后续设计。阶段 1–3 已具备；阶段 4 已新增登录、当前用户查询、登出及 Redis Session 代码，尚未完成验收。习惯、打卡及前端仍为后续设计；开发应遵循根目录 `AGENTS.md` 及相关文档。
 
 后端使用 Java 21 + Spring Boot；前端使用 UniApp + Vue 3，并以 H5 作为演示目标。
 
@@ -58,6 +58,10 @@ interview_checkin-app/
 
 Redis 会话写入失败时不得返回登录成功。
 
+当前实现由 AuthController → AuthServiceImpl → UserMapper / SessionServiceImpl 完成。用户名 trim 后按 Locale.ROOT 转小写，密码不 trim。会话值为用户 ID 字符串，固定 TTL，不滑动续期。登录响应目前只含 token，其他目标字段和完整输入校验尚未补齐。
+
+受保护请求由 AuthInterceptor 查询 Redis，将身份写入本次 HttpServletRequest 属性；`GET /auth/me` 再查询 MySQL 返回安全用户字段。`POST /auth/logout` 删除当前令牌对应的会话，其他令牌不受影响；重复登出被拦截并返回 401。拦截器只验证会话，不校验 MySQL 用户是否仍存在；用户不存在时的会话清理、Redis 专用错误码映射及 H5 跨域配置尚待完善。
+
 ### 4.2 每日打卡
 
 鉴权 → 捕获一次业务日期 D → 校验习惯属于当前用户 → MySQL 事务尝试插入 → 数据库唯一约束兜底 → 提交成功后删除今日状态与连续天数缓存 → 基于 MySQL 真实数据构造响应 → 前端展示。
@@ -94,15 +98,18 @@ Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登�
 | 环境变量 | 用途/默认策略 |
 | --- | --- |
 | `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` | MySQL 连接；真实密码不得写入源码 |
-| `REDIS_HOST`、`REDIS_PORT`、`REDIS_DATABASE` | Redis 地址；端口默认 6379、库默认 0 |
-| `REDIS_USERNAME`、`REDIS_PASSWORD` | Redis 认证信息；真实凭证不得提交 |
+| `REDIS_HOST`、`REDIS_PORT` | 已接入；地址默认 localhost，端口默认 6379 |
+| `SPRING_DATA_REDIS_DATABASE` | Spring 标准环境变量，库默认 0；未映射简写 REDIS_DATABASE |
+| `SPRING_DATA_REDIS_USERNAME`、`SPRING_DATA_REDIS_PASSWORD` | Spring 标准 Redis 认证配置；未映射简写 REDIS_USERNAME / REDIS_PASSWORD |
 | `APP_BUSINESS_ZONE` | 默认 `Asia/Shanghai` |
-| `APP_SESSION_TTL_SECONDS` | 默认 7200 秒；固定过期，不滑动续期 |
+| `SESSION_TTL_SECONDS` | 当前 YAML 显式映射至 app.session.ttl-seconds，默认 7200 秒，须为正数；固定过期 |
 | `APP_CACHE_TTL_SECONDS` | 业务缓存短 TTL，默认 30 秒 |
 | `CORS_ALLOWED_ORIGINS` | 显式允许的 H5 Origin |
 | `SERVER_PORT` | 默认 8080 |
 | `VITE_API_BASE_URL` | 前端 API 基础地址 |
-| `DEMO_USERNAME`、`DEMO_PASSWORD` | 初始化演示账户时使用，不设置仓库内固定密码 |
+| `SPRING_PROFILES_ACTIVE` | 当前默认 local；可在运行环境覆盖 |
+
+演示账户当前直接读取配置属性 `app.demo-user.username`、`app.demo-user.password`，未映射原规划的 `DEMO_USERNAME`、`DEMO_PASSWORD`。可在被 Git 忽略的本地配置中提供；两者非空白时启动即尝试初始化，不存在则写入 BCrypt 密码哈希与 UTC 时间，已存在则跳过。没有独立初始化开关或环境限制，测试环境应留空凭证。业务时区、业务缓存、CORS 和前端配置仍为规划项，不代表已经接入运行逻辑。
 
 配置由运行环境注入。后续 README 必须明确说明命令行或 IDEA 中如何提供环境变量；仓库只提供不含真实凭证的配置示例。
 

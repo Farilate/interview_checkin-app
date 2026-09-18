@@ -15,6 +15,7 @@ public class CurrentUserResponse {
 
     /**
      * 当前登录用户的数据库主键。
+     * <p>当前 long 类型按 JSON 数字输出，尚未符合 API 文档中 ID 使用字符串的目标约定。
      */
     private final long id;
 

@@ -4,8 +4,8 @@
 
 ## 当前进度
 
-阶段 3：在 MySQL 持久层基础上，已添加统一响应、参数校验、分页 DTO、全局异常处理和容器错误兜底，尚无登录/习惯/打卡业务接口。
-Redis、登录、打卡业务和前端按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 在后续阶段实现。
+阶段 1–3 的项目骨架、MySQL 持久层及统一响应已具备；阶段 4 已新增登录、查询当前用户、登出、Redis Session 和演示账户初始化代码，尚未完成登录模块验收。
+习惯、打卡业务及前端仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续实现。当前接口及与目标契约的差异见 [API 文档](docs/API.md)。
 
 ## 后端环境与启动
 
@@ -35,7 +35,7 @@ java -jar target/checkin-0.0.1-SNAPSHOT.jar
 
 macOS/Linux 使用 JDK 21，在 `backend/` 执行 `sh ./mvnw clean verify` 和 `sh ./mvnw spring-boot:run`。
 
-默认监听 8080；控制台出现 `Started CheckinApplication` 表示启动成功。当前访问 `/` 返回 404 属正常现象，尚未实现业务路由。Ctrl+C
+默认监听 8080；控制台出现 `Started CheckinApplication` 表示启动成功。当前访问 `/` 返回 404 属正常现象，认证接口位于 `/api/v1/auth`。Ctrl+C
 停止进程。
 
 IDEA：将 `backend/pom.xml` 添加为 Maven 项目，项目 SDK、Maven 导入及运行 JDK 均选择 21；Maven 使用 Wrapper；运行
@@ -52,6 +52,10 @@ IDEA：将 `backend/pom.xml` 添加为 Maven 项目，项目 SDK、Maven 导入�
 | `DB_USERNAME`       | 无，必填        | 数据库用户                                           |
 | `DB_PASSWORD`       | 无，必填        | 数据库密码，仅从运行环境注入                         |
 | `SERVER_PORT`       | `8080`          | HTTP 监听端口                                        |
+| `REDIS_HOST` | `localhost` | 登录会话 Redis 地址 |
+| `REDIS_PORT` | `6379` | Redis 端口 |
+| `SESSION_TTL_SECONDS` | `7200` | 会话固定有效期，单位秒，应为正数；读取不续期 |
+| `SPRING_PROFILES_ACTIVE` | `local` | 当前默认加载 local 配置，可由运行环境覆盖 |
 | `APP_BUSINESS_ZONE` | `Asia/Shanghai` | 当前尚未接入运行时代码，Phase 6实现，不改变 JVM 时区 |
 
 例如在同一 PowerShell 窗口执行后启动：
@@ -61,9 +65,20 @@ $env:SERVER_PORT = '8081'
 .\mvnw.cmd spring-boot:run
 ```
 
-阶段 2 已接入 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`；Redis 连接及认证、Session/缓存 TTL、CORS
-和演示账户变量在后续阶段接入，遵循 [架构配置约定](ARCHITECTURE.md)。真实凭证只在运行环境中注入，不能提交到 Git；本地 `.env*`
-和 `application-local.*` 已忽略。
+Redis 地址和 Session TTL 已接入。Redis 认证及库编号可通过 Spring 配置属性 `spring.data.redis.username`、`spring.data.redis.password`、`spring.data.redis.database` 提供，或使用对应标准环境变量 `SPRING_DATA_REDIS_USERNAME`、`SPRING_DATA_REDIS_PASSWORD`、`SPRING_DATA_REDIS_DATABASE`；当前 YAML 未映射简写变量 `REDIS_USERNAME`、`REDIS_PASSWORD`、`REDIS_DATABASE`。业务缓存 TTL、CORS 和业务时区运行逻辑尚未接入。
+
+演示账户读取 `app.demo-user.username`、`app.demo-user.password`，可在 Git 忽略的 `application-local.yml` 中配置；当前未映射 `DEMO_USERNAME`、`DEMO_PASSWORD`。两者均非空白时，应用启动会自动创建不存在的账户；已有账户不会重设密码，未配置则跳过。密码只以 BCrypt 哈希写入 MySQL。初始化器没有独立开关，测试若启动完整应用也可能触发，因此测试环境应留空演示凭证。真实凭证不得提交到 Git；本地 `.env*` 和 `application-local.*` 已忽略。
+
+## 登录、当前用户和登出
+
+启动前准备已建表的 MySQL、可访问的 Redis 及已有账户或演示账户配置。以下是当前后端行为，不代表已通过联调：
+
+1. `POST /api/v1/auth/login`：提交 JSON 用户名和密码，成功返回 `data.token`。用户名 trim 后转小写，密码不 trim。
+2. `GET /api/v1/auth/me`：携带 `Authorization: Bearer <token>`，返回 `data.id` 和 `data.username`；当前 ID 为 JSON 数字。
+3. `POST /api/v1/auth/logout`：携带相同请求头，无需请求体，成功返回 `{"code":0,"message":"ok","data":null}`。
+4. 登出后该令牌再次访问受保护接口或再次登出返回 HTTP 401 / `40101`；同一用户的其他令牌仍有效。
+
+Redis 会话键为 `checkin:v1:session:{tokenSha256}`，值是十进制用户 ID 字符串，默认固定 7200 秒过期。会话不存在时需要重新登录，不能从 MySQL 恢复令牌。当前尚无 H5 跨域配置，跨域联调前需补齐。
 
 ## MySQL 初始化与持久层
 
@@ -91,7 +106,7 @@ $env:DB_PASSWORD = $credential.GetNetworkCredential().Password
 
 IDEA 运行时在 Environment variables 中配置相同变量。MySQL 会话时区设为 UTC；Model 中 `LocalDateTime` 字段须由后续业务层按
 UTC 填入，`LocalDate` 保存业务日期。Mapper 使用参数绑定；习惯和打卡记录查询均包含用户 ID，后续 Service 必须传入服务端身份，不能信任前端
-userId。用户名小写规范化将在账户初始化/登录阶段处理；数据库采用 ASCII 二进制排序规则进行精确比较。
+userId。账户初始化和登录已执行用户名 trim 及小写规范化；字符范围和长度校验尚未补齐。数据库采用 ASCII 二进制排序规则进行精确比较。
 
 ## Phase 2 集成测试
 
@@ -129,6 +144,6 @@ HTTP 业务需在后续阶段单独验证。
 在 `backend/` 使用 Java 21 执行 `mvnw.cmd -B -ntp clean verify`，会运行 `ApiContractTest`。该测试启动随机端口的真实 HTTP
 容器，装配生产的异常处理、响应通知和 JSON 配置，不连接 MySQL/Redis。测试专用接口不会打包到生产应用。
 
-本次 36 项契约检查全部通过，0 失败/错误/跳过，构建成功。覆盖成功与
+此前阶段 3 的 36 项契约检查全部通过，0 失败/错误/跳过，构建成功。覆盖成功与
 201、空数据、全部业务错误码、请求体和参数校验、未知字段、404/405/406/415、容器错误分派、数据库故障分类及敏感信息不泄露。报告位于
 `backend/target/surefire-reports/`。本次没有重跑数据库集成测试，也没有验证登录、Redis 或前端业务。
