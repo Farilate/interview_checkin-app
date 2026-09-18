@@ -1,5 +1,6 @@
 package com.example.checkin.service.impl;
 
+import com.example.checkin.dto.CurrentUserResponse;
 import com.example.checkin.common.ErrorCode;
 import com.example.checkin.dto.LoginRequest;
 import com.example.checkin.dto.LoginResponse;
@@ -47,5 +48,23 @@ public class AuthServiceImpl implements AuthService {
         String token = sessionService.createSession(user.getId());
 
         return new LoginResponse(token);
+    }
+    @Override
+    public CurrentUserResponse getCurrentUser(long userId) {
+        User user = userMapper.findById(userId);
+
+        if (user == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+
+        return new CurrentUserResponse(
+                user.getId(),
+                user.getUsername()
+        );
+    }
+
+    @Override
+    public void logout(String token) {
+        sessionService.deleteSession(token);
     }
 }

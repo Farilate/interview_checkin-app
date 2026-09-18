@@ -47,9 +47,15 @@ public enum ErrorCode {
             "已存在同名打卡项"
     ),
 
-    NOT_ACCEPTABLE(40600, "不支持请求的响应格式"),
+    NOT_ACCEPTABLE(
+            40600,
+            "不支持请求的响应格式"
+    ),
 
-    UNSUPPORTED_MEDIA_TYPE(41500, "不支持请求的数据格式"),
+    UNSUPPORTED_MEDIA_TYPE(
+            41500,
+            "不支持请求的数据格式"
+    ),
 
     REDIS_SESSION_UNAVAILABLE(
             50301,
