@@ -52,7 +52,7 @@ IDEA：将 `backend/pom.xml` 添加为 Maven 项目，项目 SDK、Maven 导入�
 | `DB_USERNAME`       | 无，必填        | 数据库用户                                           |
 | `DB_PASSWORD`       | 无，必填        | 数据库密码，仅从运行环境注入                         |
 | `SERVER_PORT`       | `8080`          | HTTP 监听端口                                        |
-| `APP_BUSINESS_ZONE` | `Asia/Shanghai` | 预留业务时区配置；阶段 6 接入 Clock，不改变 JVM 时区 |
+| `APP_BUSINESS_ZONE` | `Asia/Shanghai` | 当前尚未接入运行时代码，Phase 6实现，不改变 JVM 时区 |
 
 例如在同一 PowerShell 窗口执行后启动：
 

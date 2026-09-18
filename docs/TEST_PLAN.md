@@ -158,6 +158,6 @@ Java 21.0.12.1 / Spring Boot 4.1.1，执行 `mvnw.cmd -B -ntp clean verify`：Ap
 
 ## 14. IDE 提示修复回归（2026-09-18）
 
-错误配置迁移为 Spring Boot 4.1 的 `spring.web.error.*`，同步错误控制器路径；补充 JSpecify 空值约定和业务时区配置元数据；移除空 Service 接口与未使用的自定义错误消息重载；Jackson 字符串读取改用 `asString()`。保留按用户与名称查询 Mapper，并在跨用户同名测例中补充命中、用户隔离及空结果断言。
+错误配置迁移为 Spring Boot 4.1 的 `spring.web.error.*`，同步错误控制器路径；补充 JSpecify 空值约定；移除当前阶段尚未实际使用的业务时区配置及仅用于 IDE 提示的配置元数据，业务时区将在 Phase 6 接入 Clock 时正式实现。移除空 Service 接口与未使用的自定义错误消息重载；Jackson 字符串读取改用 `asString()`。保留按用户与名称查询 Mapper，并在跨用户同名测例中补充命中、用户隔离及空结果断言。
 
 Java 21 下执行 `mvnw.cmd -B -ntp -Pmysql-it clean verify`：36 项 HTTP 契约检查和 10 项真实 MySQL 持久层检查全部通过，0 失败/错误/跳过，构建成功；测试数据回滚，隔离实例已关闭。IDEA 复查所列 Java/YAML 文件未报告问题，README 的客户端命令代码块与表格格式一并修正。
