@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: checkin
+  web:
+    error:
+      # Spring Boot 4 使用 spring.web.error；禁止返回异常消息、绑定值和堆栈。
+      include-message: never
+      include-binding-errors: never
+      include-stacktrace: never
+      include-exception: false
+  jackson:
+    deserialization:
+      # 严格拒绝 DTO 未声明的字段（例如客户端伪造的 userId）和多余 JSON 内容。
+      fail-on-unknown-properties: true
+      fail-on-trailing-tokens: true
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      connection-init-sql: SET time_zone = '+00:00'
+  sql:
+    init:
+      mode: never
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
+server:
+  port: ${SERVER_PORT:8080}
+

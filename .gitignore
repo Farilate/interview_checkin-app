@@ -1,0 +1,53 @@
+# =========================
+# IntelliJ IDEA
+# =========================
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# =========================
+# Maven / Java build files
+# =========================
+target/
+*.class
+
+# =========================
+# Local environment
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Spring Boot local config
+# =========================
+application-local.yml
+application-local.yaml
+application-local.properties
+
+# =========================
+# Local runtime files
+# =========================
+.local/
+*.log
+
+# =========================
+# JVM crash files
+# =========================
+hs_err_pid*
+replay_pid*
+
+# =========================
+# OS generated files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Temporary files
+# =========================
+*.tmp
+*.swp
+*~
