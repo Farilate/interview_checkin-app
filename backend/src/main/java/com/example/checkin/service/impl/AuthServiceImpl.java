@@ -1,5 +1,6 @@
 package com.example.checkin.service.impl;
 
+import com.example.checkin.auth.AuthCredentials;
 import com.example.checkin.dto.CurrentUserResponse;
 import com.example.checkin.common.ErrorCode;
 import com.example.checkin.dto.LoginRequest;
@@ -11,8 +12,6 @@ import com.example.checkin.service.AuthService;
 import com.example.checkin.service.SessionService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-
-import java.util.Locale;
 
 /**
  * 认证业务实现：MySQL 提供用户及密码哈希，Redis 保存登录会话。
@@ -41,9 +40,7 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public LoginResponse login(LoginRequest request) {
-        String username = request.getUsername()
-                .trim()
-                .toLowerCase(Locale.ROOT);
+        String username = AuthCredentials.normalize(request.getUsername(), request.getPassword());
 
         User user = userMapper.findByUsername(username);
 
@@ -57,11 +54,13 @@ public class AuthServiceImpl implements AuthService {
         // 此处失败会直接向上传递异常，不能返回一个没有服务端会话的令牌。
         String token = sessionService.createSession(user.getId());
 
-        return new LoginResponse(token);
+        return new LoginResponse(token, "Bearer", sessionService.getTtlSeconds(),
+                new CurrentUserResponse(String.valueOf(user.getId()), user.getUsername()));
     }
+
     /**
      * 按拦截器提供的身份重新查询用户，仅返回 ID 和用户名。
-     * <p>用户已被删除时返回未登录；当前实现尚未清除其遗留的 Redis 会话。
+     * <p>用户已被删除时返回未登录；认证拦截器负责撤销本次请求对应的遗留会话。
      */
     @Override
     public CurrentUserResponse getCurrentUser(long userId) {
@@ -72,7 +71,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         return new CurrentUserResponse(
-                user.getId(),
+                String.valueOf(user.getId()),
                 user.getUsername()
         );
     }

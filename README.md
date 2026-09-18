@@ -5,7 +5,7 @@
 ## 当前进度
 
 阶段 1–3 的项目骨架、MySQL 持久层及统一响应已具备；阶段 4 已新增登录、查询当前用户、登出、Redis Session 和演示账户初始化代码，尚未完成登录模块验收。
-习惯、打卡业务及前端仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续实现。当前接口及与目标契约的差异见 [API 文档](docs/API.md)。
+习惯、打卡业务及前端仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续实现。当前接口契约见 [API 文档](docs/API.md)。
 
 ## 后端环境与启动
 
@@ -56,7 +56,6 @@ IDEA：将 `backend/pom.xml` 添加为 Maven 项目，项目 SDK、Maven 导入�
 | `REDIS_PORT` | `6379` | Redis 端口 |
 | `SESSION_TTL_SECONDS` | `7200` | 会话固定有效期，单位秒，应为正数；读取不续期 |
 | `SPRING_PROFILES_ACTIVE` | `local` | 当前默认加载 local 配置，可由运行环境覆盖 |
-| `APP_BUSINESS_ZONE` | `Asia/Shanghai` | 当前尚未接入运行时代码，Phase 6实现，不改变 JVM 时区 |
 
 例如在同一 PowerShell 窗口执行后启动：
 
@@ -73,8 +72,8 @@ Redis 地址和 Session TTL 已接入。Redis 认证及库编号可通过 Spring
 
 启动前准备已建表的 MySQL、可访问的 Redis 及已有账户或演示账户配置。以下是当前后端行为，不代表已通过联调：
 
-1. `POST /api/v1/auth/login`：提交 JSON 用户名和密码，成功返回 `data.token`。用户名 trim 后转小写，密码不 trim。
-2. `GET /api/v1/auth/me`：携带 `Authorization: Bearer <token>`，返回 `data.id` 和 `data.username`；当前 ID 为 JSON 数字。
+1. `POST /api/v1/auth/login`：提交 JSON 用户名和密码，成功返回 `data.token`、`tokenType`、`expiresIn` 和 `user`。用户名 trim 后转小写，密码不 trim。
+2. `GET /api/v1/auth/me`：携带 `Authorization: Bearer <token>`，返回 `data.id` 和 `data.username`；ID 为十进制字符串。
 3. `POST /api/v1/auth/logout`：携带相同请求头，无需请求体，成功返回 `{"code":0,"message":"ok","data":null}`。
 4. 登出后该令牌再次访问受保护接口或再次登出返回 HTTP 401 / `40101`；同一用户的其他令牌仍有效。
 
@@ -106,7 +105,7 @@ $env:DB_PASSWORD = $credential.GetNetworkCredential().Password
 
 IDEA 运行时在 Environment variables 中配置相同变量。MySQL 会话时区设为 UTC；Model 中 `LocalDateTime` 字段须由后续业务层按
 UTC 填入，`LocalDate` 保存业务日期。Mapper 使用参数绑定；习惯和打卡记录查询均包含用户 ID，后续 Service 必须传入服务端身份，不能信任前端
-userId。账户初始化和登录已执行用户名 trim 及小写规范化；字符范围和长度校验尚未补齐。数据库采用 ASCII 二进制排序规则进行精确比较。
+userId。账户初始化和登录已执行用户名 trim 及小写规范化；用户名限制为 3–32 位 ASCII 字母、数字或下划线，密码限制为 8–72 个 UTF-8 字节。数据库采用 ASCII 二进制排序规则进行精确比较。
 
 ## Phase 2 集成测试
 
@@ -122,9 +121,9 @@ userId。账户初始化和登录已执行用户名 trim 及小写规范化；�
 .\mvnw.cmd -B -ntp -Pmysql-it clean verify
 ```
 
-普通 `clean verify` 执行阶段 3 Web 契约测试并打包，不执行 `PersistenceIT`。报告位于 `backend/target/failsafe-reports/`
-。当前测试覆盖三个 Mapper、字段映射、分页与用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键。并发与
-HTTP 业务需在后续阶段单独验证。
+普通 `clean verify` 执行 56 项公共 HTTP 契约检查和 25 项认证回归并打包，不执行 `PersistenceIT`；报告位于 `backend/target/surefire-reports/`。启用 `mysql-it` 后额外运行 10 项真实 MySQL 持久层测试，报告位于 `backend/target/failsafe-reports/`。
+
+持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，不代表业务接口或 HTTP 并发验收已完成。测试前应留空演示账户初始化凭证。
 
 ## 当前技术与业务约定
 
@@ -132,18 +131,18 @@ HTTP 业务需在后续阶段单独验证。
   均应选择它。
 - Model 使用 Lombok `@Getter`、`@Setter`，Maven 显式配置注解处理器，版本由 Spring Boot 管理。重新导入 Maven 项目即可获取依赖；IDEA
   编译需要启用注解处理。配置依据：[Lombok Maven 说明](https://projectlombok.org/setup/maven)。
-- 不同用户允许同名习惯，同一用户内名称唯一；数据库约束为 `uk_habits_user_name(user_id, name)`。名称先 trim，并按数据库
-  `utf8mb4_0900_ai_ci` 排序规则判重，同用户冲突返回 HTTP 409 / `40901`。
-- 已有旧表不会因修改建表脚本自动升级；应核对现有库已包含该唯一索引。本次不重复修改用户已经更新的数据库。
-- MySQL 本机版本为 26.7.0；Redis、前端及完整业务联调未在本次验证。此前测试记录见 `docs/TEST_PLAN.md`，旧规则的结果不能替代当前规则验收。
-  最新验证：Java 21 下执行 `-Pmysql-it clean verify` 构建成功，真实 MySQL 上 10 个持久层测试全部通过（包含新的习惯名称唯一规则）；测试数据全部回滚，详见
-  docs/TEST_PLAN.md 第 12 节。
+- 不同用户允许同名习惯，同一用户内名称唯一；数据库约束为 `uk_habits_user_name(user_id, name)`，按 `utf8mb4_0900_ai_ci` 排序规则判重。
+- 已有表不会随建表脚本变更自动升级，应确认数据库已包含约定的唯一索引。
+- 习惯名称 trim 和 HTTP 409 / `40901` 属于 Phase 5 的业务接口要求；当前已落实数据库约束。
 
-## 阶段 3 Web 验证
+## 异常处理约定
 
-在 `backend/` 使用 Java 21 执行 `mvnw.cmd -B -ntp clean verify`，会运行 `ApiContractTest`。该测试启动随机端口的真实 HTTP
-容器，装配生产的异常处理、响应通知和 JSON 配置，不连接 MySQL/Redis。测试专用接口不会打包到生产应用。
+业务层明确指定 ErrorCode，MVC 已知异常按类型映射，未知异常返回 50001；不从 HTTP 状态反推业务原因。Redis 会话故障保持 50301，数据库可用性故障保持 50302。容器错误分派和日志脱敏规则详见 [API 文档](docs/API.md)。
 
-此前阶段 3 的 36 项契约检查全部通过，0 失败/错误/跳过，构建成功。覆盖成功与
-201、空数据、全部业务错误码、请求体和参数校验、未知字段、404/405/406/415、容器错误分派、数据库故障分类及敏感信息不泄露。报告位于
-`backend/target/surefire-reports/`。本次没有重跑数据库集成测试，也没有验证登录、Redis 或前端业务。
+## 验证结果与限制
+
+2026-09-18，Java 21.0.12.1 / Maven 3.9.11 下异常映射重构后的 `verify` 构建成功：81 项测试全部通过，0 失败、0 错误、0 跳过。其中公共 HTTP 契约测试 56 项、认证回归 25 项；认证回归使用外部存储替身。
+
+真实 MySQL 的 10 项持久层测试在此前回归中通过，认证修复后未重跑。真实 MySQL/Redis 登录联调、实际会话到期、断网故障、演示账户并发初始化和 H5 尚未验收，阶段 4 因此尚未完成全部验收。CORS 留待 H5 联调阶段处理。
+
+测试覆盖、报告位置和剩余验收项统一维护在 [测试计划](docs/TEST_PLAN.md) 第 9–10 节。

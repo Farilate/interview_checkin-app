@@ -1,10 +1,14 @@
 package com.example.checkin.service;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * 登录会话的创建、查询与删除入口。
  * <p>原始令牌由客户端持有，服务端通过其摘要定位 Redis 会话；会话丢失后必须重新登录。
  */
 public interface SessionService {
+    /** 返回创建会话使用的固定有效期，单位秒，供登录响应与 Redis TTL 保持一致。 */
+    long getTtlSeconds();
 
     /**
      * 为已完成密码验证的用户创建独立会话，不撤销该用户的其他会话。
@@ -18,7 +22,7 @@ public interface SessionService {
      * @param token 客户端提交的原始令牌，而非摘要
      * @return 会话中的用户 ID；会话不存在或已过期时返回 null
      */
-    Long getUserId(String token);
+    @Nullable Long getUserId(String token);
 
     /**
      * 删除指定令牌对应的会话；键已不存在时正常结束，Redis 故障向上传递。

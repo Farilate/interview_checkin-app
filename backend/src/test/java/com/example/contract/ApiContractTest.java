@@ -28,6 +28,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.beans.ConversionNotSupportedException;
+import org.springframework.validation.BindException;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -134,6 +140,59 @@ class ApiContractTest {
                 unavailable ? 50302 : 50001);
     }
 
+    /** 通用框架异常仅携带状态时不能猜测凭证、路由或基础设施的业务原因。 */
+    @ParameterizedTest
+    @ValueSource(ints = {400, 401, 404, 405, 406, 415, 503})
+    void statusAloneDoesNotSelectBusinessCode(int status) throws Exception {
+        check(send("GET", "/probe/status/" + status, null), 500, 50001);
+    }
+
+    /** 容器仅保留无异常 404 的路由语义，其余状态安全回退到内部错误。 */
+    @ParameterizedTest
+    @ValueSource(ints = {400, 401, 404, 405, 406, 415, 503})
+    void containerStatusDoesNotGuessBusinessCause(int status) throws Exception {
+        check(send("GET", "/probe/container/" + status, null),
+                status == 404 ? 404 : 500, status == 404 ? 40400 : 50001);
+    }
+
+    /** 服务端返回值校验、路径配置和转换器配置错误不能误报客户端参数错误。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"return-value", "conversion", "missing-path"})
+    void serverValidationErrorsRemain500(String failure) throws Exception {
+        check(send("GET", "/probe/" + failure, null), 500, 50001);
+    }
+
+    /** 普通绑定异常依然返回 400，覆盖父类未直接注册的 BindException。 */
+    @Test
+    void bindingErrorIs400() throws Exception {
+        check(send("GET", "/probe/bind", null), 400, 40001);
+    }
+
+    /** 容器 404 同时带有未知异常时，不掩盖异常并误报路由不存在。 */
+    @Test
+    void containerExceptionTakesPrecedenceOver404() {
+        var request = new org.springframework.mock.web.MockHttpServletRequest();
+        request.setAttribute(jakarta.servlet.RequestDispatcher.ERROR_STATUS_CODE, 404);
+        request.setAttribute(jakarta.servlet.RequestDispatcher.ERROR_EXCEPTION,
+                new IllegalStateException("private-secret"));
+        var response = new ApiErrorController().error(request);
+        assertEquals(500, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        assertEquals(50001, response.getBody().code());
+        assertEquals("no-store", response.getHeaders().getCacheControl());
+    }
+
+    /** 未知异常保留排查位置，日志和响应均不泄露异常原文中的敏感样本。 */
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void unexpectedLogsAreSafe(CapturedOutput output) throws Exception {
+        check(send("GET", "/probe/failure/internal", null), 500, 50001);
+        assertTrue(output.getAll().contains("IllegalStateException"));
+        assertTrue(output.getAll().contains("ApiContractTest"));
+        assertFalse(output.getAll().contains("private-secret"));
+        assertFalse(output.getAll().contains("SELECT password_hash"));
+    }
+
     /** 统一发送请求，给网络调用设置超时，避免失败时无限等待。 */
     private HttpResponse<String> send(String method, String path, String body) throws Exception {
         return client.send(HttpRequest.newBuilder(uri(path)).timeout(Duration.ofSeconds(10))
@@ -216,5 +275,34 @@ class ApiContractTest {
         void container(HttpServletResponse response) throws java.io.IOException {
             response.sendError(500, "private-secret");
         }
+
+        /** 仅提供状态和敏感原因，不提供可识别业务语义。 */
+        @GetMapping("/status/{status}")
+        void status(@PathVariable int status) {
+            throw new ResponseStatusException(HttpStatus.valueOf(status), "private-secret");
+        }
+
+        /** 验证各种原始容器状态不会被错误猜测为某个业务错误。 */
+        @GetMapping("/container/{status}")
+        void containerStatus(@PathVariable int status, HttpServletResponse response) throws java.io.IOException {
+            response.sendError(status, "private-secret");
+        }
+
+        /** 返回值违反服务端声明属于程序错误，而非请求参数错误。 */
+        @Min(1)
+        @GetMapping("/return-value")
+        int invalidReturnValue() { return 0; }
+
+        /** 缺少转换器配置与客户端传入不可转换的数字属于不同错误类型。 */
+        @GetMapping("/conversion")
+        void conversion() { throw new ConversionNotSupportedException("private-secret", Integer.class, null); }
+
+        /** 故意缺少路由占位符，模拟服务端声明配置错误。 */
+        @GetMapping("/missing-path")
+        void missingPath(@PathVariable String absent) { }
+
+        /** 普通绑定异常没有状态推断，按异常类型直接映射。 */
+        @GetMapping("/bind")
+        void binding() throws BindException { throw new BindException(new Object(), "probe"); }
     }
 }

@@ -2,7 +2,7 @@
 
 ## 1. MySQL 通用约定
 
-使用 InnoDB、utf8mb4。三张核心表采用 BIGINT UNSIGNED 自增主键；目标要求 API 中 ID 以字符串传输，当前 `/auth/me` 数字 ID 是待修正差异。
+使用 InnoDB、utf8mb4。三张核心表采用 BIGINT UNSIGNED 自增主键；API 中 ID 以十进制字符串传输，登录响应和 `/auth/me` 已遵循该约定。
 
 除显式标注 `NULL` 外，字段均为 `NOT NULL`。时间戳字段使用 `DATETIME(3)`，由应用按 UTC 写入；`checkin_date` 为 `Asia/Shanghai` 对应的业务 `DATE`。
 
@@ -74,7 +74,7 @@ database/init.sql
 
 外键采用 `ON DELETE RESTRICT / ON UPDATE RESTRICT`。本期无删除功能，不使用级联删除清除历史打卡记录。
 
-## 5. 事务与并发写入
+## 5. 事务与并发写入（业务层待实现）
 
 每日打卡的基本流程：
 
@@ -102,7 +102,7 @@ checkin:v1
 
 | 用途与 Key | Value | TTL | 写入时机 | 删除/更新时机 | Miss 处理 |
 | --- | --- | --- | --- | --- | --- |
-| 登录态 `checkin:v1:session:{tokenSha256}` | 当前实现：十进制用户 ID 字符串，如 `1`，不是 JSON | 默认 7200 秒，固定过期，读取不续期 | 用户名密码验证成功后，同时写入值和 TTL；写入成功才返回 Token | 自动过期；登出删除当前令牌对应的键 | 不能从 MySQL 恢复原 Session；返回 401，用户重新登录 |
+| 登录态 `checkin:v1:session:{tokenSha256}` | 当前实现：十进制用户 ID 字符串，如 `1`，不是 JSON | 默认 7200 秒，固定过期，读取不续期 | 用户名密码验证成功后，同时写入值和 TTL；写入成功才返回 Token | 自动过期；登出、用户不存在或身份值损坏时删除当前会话键 | 不能从 MySQL 恢复原 Session；返回 401，用户重新登录 |
 | 今日状态 `checkin:v1:today:{uid}:{hid}:{D}` | JSON：date、checkedIn、recordId、checkedInAt | 默认 30 秒，且不得跨到下一个业务日继续使用 | 查询 Miss 后从 MySQL 回源并写入 | 打卡事务提交后删除；读取不续期 | 查询 MySQL 恢复真实状态 |
 | 连续天数 `checkin:v1:streak:{uid}:{hid}:{D}` | JSON：asOfDate、streakDays、streakEndDate | 默认 30 秒，且不得跨到下一个业务日继续使用 | 查询 Miss 后从 MySQL 计算并写入 | 打卡事务提交后删除；读取不续期 | 从 MySQL 倒序读取并重算 |
 
@@ -110,9 +110,9 @@ checkin:v1
 
 当前仅登录态已接入，today/streak 仍为后续设计。会话摘要为原始 Token 的 SHA-256 小写十六进制字符串；不保存原始 Token、密码、issuedAt 或 expiresAt。有效期由 Redis TTL 管理，配置属性为 `app.session.ttl-seconds`，当前 YAML 使用 `SESSION_TTL_SECONDS` 注入。
 
-同一用户可拥有多个独立会话，登出只删除本次令牌的键。用户已不存在时清理会话仍是待实现要求：目前 `/auth/me` 只返回 401，没有删除键，拦截器也不查询用户表。Redis 故障错误码分类及损坏会话值处理尚待补齐和验证。
+同一用户可拥有多个独立会话，登出只删除本次令牌的键。拦截器通过认证服务确认 MySQL 用户存在；不存在则删除当前会话并返回 401。损坏或非正数用户 ID 会话也会被撤销。会话读、写、删除的数据访问异常统一返回 50301；清理失败时同样返回 50301，不放行。
 
-## 7. MySQL / Redis 一致性策略
+## 7. MySQL / Redis 业务缓存一致性策略（后续阶段）
 
 业务缓存采用简单 Cache-Aside：
 

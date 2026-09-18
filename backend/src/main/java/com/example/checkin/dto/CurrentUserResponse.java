@@ -15,9 +15,9 @@ public class CurrentUserResponse {
 
     /**
      * 当前登录用户的数据库主键。
-     * <p>当前 long 类型按 JSON 数字输出，尚未符合 API 文档中 ID 使用字符串的目标约定。
+     * <p>使用十进制字符串，避免 H5 JavaScript 对大整数发生精度丢失。
      */
-    private final long id;
+    private final String id;
 
     /**
      * 当前登录用户名。

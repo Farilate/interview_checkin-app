@@ -25,7 +25,7 @@ public class AuthController {
     /**
      * 匿名登录；请求体先进行非空校验，成功后以统一响应返回令牌。
      * @param request 用户名和原始密码，不接受客户端指定用户 ID
-     * @return 当前实现仅包含 token 的登录数据
+     * @return 令牌、认证方案、会话有效期和安全用户资料
      */
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(

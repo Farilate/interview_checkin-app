@@ -2,14 +2,14 @@
 
 ## 1. 执行边界
 
-以下是后续实施计划，不是已完成清单。每次只执行用户明确授权的阶段；阶段结束后汇报并停止，不因为本计划存在就自动连续实现后续阶段，也不自动提交 Git commit。
+下表定义各阶段范围和验收标准，具体进度见第 2 节，不应将计划条目视为已完成。每次只执行用户明确授权的阶段；阶段结束后汇报并停止，不因为本计划存在就自动连续实现后续阶段，也不自动提交 Git commit。
 
 | 阶段 | 工作范围及预期交付 | 验证与完成条件 |
 | --- | --- | --- |
 | Phase 1：Spring Boot 项目初始化 | 核对并固定 JDK/Spring Boot 兼容版本；创建 `backend/`、`pom.xml`、Maven Wrapper、启动入口、基础配置与 `.gitignore` 补充 | Maven 构建通过；环境变量来源明确；不提前写登录/打卡业务 |
 | Phase 2：MySQL 表和基础持久层 | 创建 `database/init.sql`；落实 users、habits、checkin_records、复合外键及唯一索引；引入 MyBatis 和 Mapper | 在真实 MySQL 空库执行脚本成功；重复打卡三元组被数据库拒绝；用户名唯一约束有效；同用户习惯名称唯一、跨用户同名允许 |
 | Phase 3：统一响应和异常处理 | 统一 DTO、参数校验、全局异常处理、HTTP/code 映射 | 合法与非法请求均符合 `API.md`；内部错误不泄露 SQL、凭证或堆栈 |
-| Phase 4：登录和 Redis 登录态 | BCrypt 验证；随机 Token；Redis Session；当前用户上下文；初始化演示账户 | 正确/错误密码、账户不存在、Session 过期均符合契约；Redis 中 Session 有真实 TTL；前端 userId 不能替代登录身份 |
+| Phase 4：登录和 Redis 登录态 | BCrypt 验证；随机 Token；Redis Session；当前用户查询与上下文；登出；初始化演示账户 | 正确/错误密码、账户不存在、Session 过期均符合契约；Redis 中 Session 有真实 TTL；前端 userId 不能替代登录身份 |
 | Phase 5：打卡项管理 | 创建习惯、当前用户分页列表、名称校验及用户隔离 | 数据真实写入 MySQL；刷新后仍可查询；不同用户互相隔离；空列表正常 |
 | Phase 6：每日打卡和并发安全 | 统一 Clock/业务日期；实现 `PUT /habits/{habitId}/checkins/today`；事务插入和指定唯一约束冲突处理；今日状态查询 | 首次 `created=true`；重复/并发 `created=false`；数据库最终只有一条；其他数据库异常不得伪装成功 |
 | Phase 7：连续打卡算法 | 后端按 `LocalDate` 计算 streak；完善 streak GET 接口和打卡响应 | 验证今天/昨天锚点、断签、跨月、跨年；结果不使用总次数代替 |
@@ -18,11 +18,13 @@
 | Phase 10：前后端联调 | 跑通登录 → 创建 → 查询 → 打卡 → 今日状态/连续天数 → 刷新 | 浏览器 Network、MySQL 三表和 Redis 三类 Key 相互印证；刷新后业务结果仍存在；多用户隔离有效 |
 | Phase 11：测试、README 和演示准备 | 执行 `TEST_PLAN.md` 必做测试；完善启动、环境变量、数据库初始化、Redis Key 和算法说明；准备演示 | 干净环境可按 README 启动；提供依赖清单和 SQL；必做测试结果明确；可选准备 3 分钟录屏 |
 
-## 2. 已确认的实现决策
+## 2. 当前进度与已确认决策
 
-当前进度：阶段 1–3 已有实现；阶段 4 已新增 `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`、BCrypt、Redis 固定 TTL 会话及演示账户初始化。阶段 4 尚未完成验收：需核对输入边界、登录响应字段、ID 字符串格式、Redis 故障分类、已删除用户会话清理，并执行真实 MySQL/Redis 登录与登出测试。本次仅同步文档和注释，不修改业务行为或进入阶段 5。
+当前进度：阶段 1–3 已有实现；阶段 4 已新增 `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`、BCrypt、Redis 固定 TTL 会话及演示账户初始化。阶段 4 已修复输入边界、登录响应字段、ID 字符串格式、Redis 故障分类及已删除用户会话清理，并新增认证回归测试。真实 MySQL/Redis 登录与登出联调仍待执行，因此尚未完成阶段验收。阶段 5–11 仍待按用户授权逐步实施，CORS 随 H5 联调处理。
 
 阶段 4 的验收补充包含：登出删除当前会话、其他会话不受影响、登出后原令牌被拒绝、重复登出返回当前约定的 401；详见 `API.md` 和 `TEST_PLAN.md`。
+
+公共异常处理已改为按异常类型或明确业务原因选择 ErrorCode，移除 HTTP 状态反推；未知异常和无明确原因的容器错误安全回退 50001。此调整属于现有公共模块维护，不扩展 Phase 5/6 业务。
 
 以下决策不再作为待确认项：
 
@@ -58,16 +60,16 @@ Phase 8 只增加业务查询缓存；Redis Session 已在 Phase 4 中真实使�
 
 测试允许在隔离测试库构造历史日期数据，但不能为了演示新增“任意指定打卡日期”的生产 API。
 
-## 5. Phase 1 需要核对但不影响业务设计的环境项
+## 5. 已固定环境与后续环境项
 
-进入 Phase 1 时再根据本机环境确定并记录：
+| 项目 | 状态 |
+| --- | --- |
+| Java | 编译目标 21；最近测试使用 Microsoft JDK 21.0.12.1 |
+| Spring Boot | 4.1.1 |
+| Maven | Wrapper 固定 3.9.11 |
+| MyBatis Starter | 4.1.0 |
+| MySQL | SQL 要求 8.0+；此前隔离测试实例记录为 26.7.0 |
+| Redis | 认证代码已接入，实际运行版本与联调证据待记录 |
+| Node / npm、UniApp 启动方式 | 前端阶段确定 |
 
-- JDK 版本：已确定为 Java 21。
-- Spring Boot 版本。
-- Maven 版本或 Maven Wrapper。
-- MySQL 版本。
-- Redis 版本。
-- Node / npm 版本。
-- UniApp/HBuilderX 或 CLI 的本地启动方式。
-
-这些属于开发环境选择，不改变已经确认的业务规则。
+这些属于开发环境约定，不改变已经确认的业务规则。启动配置见 README，测试证据及限制见 TEST_PLAN.md 第 9–10 节。

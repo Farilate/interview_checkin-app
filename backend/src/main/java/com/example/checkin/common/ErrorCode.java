@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
  *
  * <p>错误码定义必须与 docs/API.md 保持同步。
  * Controller 和 Service 不应散落 40001、40101 等魔法数字。
+ * 错误原因由业务边界或具体异常类型确定；仅支持错误码到 HTTP 状态的正向转换。
  */
 @Getter
 public enum ErrorCode {
@@ -80,21 +81,6 @@ public enum ErrorCode {
         return HttpStatus.valueOf(code / 100);
     }
 
-    /**
-     * 将框架或容器的 HTTP 错误转换为项目错误码。
-     * 业务异常应直接指定枚举；这里无法根据 404 判断业务资源归属，因此统一表示路由不存在。
-     */
-    public static ErrorCode fromHttpStatus(int status) {
-        return switch (status) {
-            case 400 -> INVALID_ARGUMENT;
-            case 401 -> UNAUTHORIZED;
-            case 404 -> ROUTE_NOT_FOUND;
-            case 405 -> METHOD_NOT_ALLOWED;
-            case 406 -> NOT_ACCEPTABLE;
-            case 415 -> UNSUPPORTED_MEDIA_TYPE;
-            default -> INTERNAL_ERROR;
-        };
-    }
 
     ErrorCode(
             int code,

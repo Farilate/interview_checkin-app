@@ -7,7 +7,7 @@ import lombok.Setter;
 
 /**
  * 登录请求体；Lombok 生成访问方法，Bean Validation 负责非空白校验。
- * <p>当前尚未校验用户名字符范围、长度及密码 UTF-8 字节数，详见需求文档的待补齐项。
+ * <p>服务层通过 AuthCredentials 校验规范化后的用户名范围和密码 UTF-8 字节数。
  */
 @Setter
 @Getter

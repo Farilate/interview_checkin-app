@@ -3,6 +3,8 @@ package com.example.checkin.auth;
 import com.example.checkin.common.ErrorCode;
 import com.example.checkin.exception.BusinessException;
 import com.example.checkin.service.SessionService;
+import com.example.checkin.service.AuthService;
+import org.jspecify.annotations.NullMarked;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Component;
@@ -11,10 +13,12 @@ import org.springframework.web.servlet.HandlerInterceptor;
 /**
  * 在受保护接口执行前验证 Redis 登录会话，并将用户身份放入当前请求。
  * <p>拦截范围由 WebMvcConfig 注册；登录接口允许匿名访问。
- * 本类只检查会话，不查询 MySQL 中用户是否仍然存在，也不负责资源归属校验。
- * Redis 访问异常向上传递，不会将故障当作认证成功。
+ * 会话有效后还检查 MySQL 用户是否存在，缺失则撤销当前会话；不负责习惯等资源归属校验。
+ * Redis 会话访问故障由会话服务转换为 50301，数据库查询故障交给统一异常处理器。
+ * 任一步骤失败均不放行，也不写入当前用户属性。
  */
 @Component
+@NullMarked
 public class AuthInterceptor implements HandlerInterceptor {
 
     /** 服务端请求属性名，供 Controller 读取；与客户端提交的 userId 参数无关。 */
@@ -26,10 +30,12 @@ public class AuthInterceptor implements HandlerInterceptor {
             "Bearer ";
 
     private final SessionService sessionService;
+    private final AuthService authService;
 
-    /** 通过构造器注入会话服务，拦截器自身不保存某个请求的用户信息。 */
-    public AuthInterceptor(SessionService sessionService) {
+    /** 注入会话服务和认证服务，分别查询会话身份与数据库用户；不保存跨请求用户状态。 */
+    public AuthInterceptor(SessionService sessionService, AuthService authService) {
         this.sessionService = sessionService;
+        this.authService = authService;
     }
 
     /**
@@ -37,8 +43,8 @@ public class AuthInterceptor implements HandlerInterceptor {
      * @param request 当前请求，认证成功后写入用户 ID 属性
      * @param response 当前响应，失败响应由统一异常处理器生成
      * @param handler 本次请求匹配的处理器
-     * @return 会话存在时返回 true，允许继续处理请求
-     * @throws BusinessException 请求头缺失、格式错误、令牌为空或会话不存在时抛出未登录异常
+     * @return 会话有效且数据库用户存在时返回 true，允许继续处理请求
+     * @throws BusinessException 请求头或身份无效时为未登录；Redis 查询或清理故障时为会话不可用
      */
     @Override
     public boolean preHandle(
@@ -68,6 +74,16 @@ public class AuthInterceptor implements HandlerInterceptor {
 
         if (userId == null) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+
+        // 只在用户不存在时撤销当前令牌；数据库暂时不可用不能当作用户已删除。
+        try {
+            authService.getCurrentUser(userId);
+        } catch (BusinessException exception) {
+            if (exception.getErrorCode() == ErrorCode.UNAUTHORIZED) {
+                sessionService.deleteSession(token);
+            }
+            throw exception;
         }
 
         // 属性只属于本次请求，无须像 ThreadLocal 一样在线程复用时额外清理。

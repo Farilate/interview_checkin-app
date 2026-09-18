@@ -34,6 +34,10 @@ flowchart LR
 | Redis 访问组件 | 会话和业务缓存读写、TTL、缓存失效 | 代替 MySQL 持久化业务记录 |
 | 全局异常处理 | 统一 HTTP 状态和 `code/message/data` | 向客户端泄露 SQL、密码或堆栈 |
 
+异常映射依据错误来源：业务层直接指定 ErrorCode；Spring MVC 使用具体异常类型选择错误码；Redis 会话边界指定 50301，数据库可用性异常指定 50302。ErrorCode 仅提供到 HTTP 状态的正向转换。无法识别原因的异常统一为 50001，不依据通用 HTTP 401/404/503 猜业务语义。
+
+GlobalExceptionHandler 保留 ResponseEntityExceptionHandler 的具体异常注册与协议头，在统一出口按类型映射；不重复注册父类异常。容器 `/error` 仅对无异常的 404 保留路由语义，其余未知分派安全回退。未知错误日志保留类型和堆栈位置，不打印可能携带敏感信息的异常原文。未分类唯一约束冲突继续返回 50001，由后续业务 Service 识别具体约束，不能全局映射为习惯重名。
+
 后续目录规划：
 
 ```text
@@ -58,11 +62,11 @@ interview_checkin-app/
 
 Redis 会话写入失败时不得返回登录成功。
 
-当前实现由 AuthController → AuthServiceImpl → UserMapper / SessionServiceImpl 完成。用户名 trim 后按 Locale.ROOT 转小写，密码不 trim。会话值为用户 ID 字符串，固定 TTL，不滑动续期。登录响应目前只含 token，其他目标字段和完整输入校验尚未补齐。
+当前实现由 AuthController → AuthServiceImpl → UserMapper / SessionServiceImpl 完成。用户名 trim 后按 Locale.ROOT 转小写，密码不 trim。会话值为用户 ID 字符串，固定 TTL，不滑动续期。登录响应包含 token、tokenType、expiresIn 和 user，用户 ID 为字符串。登录与账户初始化共用用户名范围及密码 UTF-8 字节数校验。
 
-受保护请求由 AuthInterceptor 查询 Redis，将身份写入本次 HttpServletRequest 属性；`GET /auth/me` 再查询 MySQL 返回安全用户字段。`POST /auth/logout` 删除当前令牌对应的会话，其他令牌不受影响；重复登出被拦截并返回 401。拦截器只验证会话，不校验 MySQL 用户是否仍存在；用户不存在时的会话清理、Redis 专用错误码映射及 H5 跨域配置尚待完善。
+受保护请求由 AuthInterceptor 查询 Redis，将身份写入本次 HttpServletRequest 属性；`GET /auth/me` 再查询 MySQL 返回安全用户字段。`POST /auth/logout` 删除当前令牌对应的会话，其他令牌不受影响；重复登出被拦截并返回 401。拦截器还通过认证服务确认 MySQL 用户存在，否则撤销当前会话。Redis 会话数据访问故障统一为 50301。H5 跨域配置留待前端联调阶段实现。
 
-### 4.2 每日打卡
+### 4.2 每日打卡（后续阶段）
 
 鉴权 → 捕获一次业务日期 D → 校验习惯属于当前用户 → MySQL 事务尝试插入 → 数据库唯一约束兜底 → 提交成功后删除今日状态与连续天数缓存 → 基于 MySQL 真实数据构造响应 → 前端展示。
 
@@ -74,13 +78,15 @@ PUT /api/v1/habits/{habitId}/checkins/today
 
 同一用户、同一习惯、同一业务日期内重复调用是幂等的：首次 `created=true`，重复调用 `created=false`，数据库始终最多一条记录。
 
-### 4.3 查询
+### 4.3 业务缓存查询（后续阶段）
 
 鉴权及资源归属校验 → 查询 Redis 业务缓存 → Cache Miss 时查询 MySQL → 回填短 TTL 缓存 → 返回结果。
 
 Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登录会话不能从 MySQL 自动恢复，Redis 中会话不存在时必须重新登录。
 
-## 5. 时间、身份与安全
+## 5. 时间、身份与安全约定
+
+身份及密码规则已用于认证模块；Clock、业务日期、资源归属、H5 存储和 CORS 属于后续阶段要求。
 
 - 全局业务时区固定为 `Asia/Shanghai`，通过 `APP_BUSINESS_ZONE` 配置；有业务数据后不能随意修改该语义。
 - 后端使用可注入 `Clock` 获取时间；一次业务请求只确定一次业务日期 D。
@@ -101,17 +107,17 @@ Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登�
 | `REDIS_HOST`、`REDIS_PORT` | 已接入；地址默认 localhost，端口默认 6379 |
 | `SPRING_DATA_REDIS_DATABASE` | Spring 标准环境变量，库默认 0；未映射简写 REDIS_DATABASE |
 | `SPRING_DATA_REDIS_USERNAME`、`SPRING_DATA_REDIS_PASSWORD` | Spring 标准 Redis 认证配置；未映射简写 REDIS_USERNAME / REDIS_PASSWORD |
-| `APP_BUSINESS_ZONE` | 默认 `Asia/Shanghai` |
+| `APP_BUSINESS_ZONE` | 规划项：默认 `Asia/Shanghai`，Phase 6 接入 |
 | `SESSION_TTL_SECONDS` | 当前 YAML 显式映射至 app.session.ttl-seconds，默认 7200 秒，须为正数；固定过期 |
-| `APP_CACHE_TTL_SECONDS` | 业务缓存短 TTL，默认 30 秒 |
-| `CORS_ALLOWED_ORIGINS` | 显式允许的 H5 Origin |
+| `APP_CACHE_TTL_SECONDS` | 规划项：业务缓存短 TTL，默认 30 秒 |
+| `CORS_ALLOWED_ORIGINS` | 规划项：显式允许的 H5 Origin |
 | `SERVER_PORT` | 默认 8080 |
-| `VITE_API_BASE_URL` | 前端 API 基础地址 |
+| `VITE_API_BASE_URL` | 规划项：前端 API 基础地址 |
 | `SPRING_PROFILES_ACTIVE` | 当前默认 local；可在运行环境覆盖 |
 
 演示账户当前直接读取配置属性 `app.demo-user.username`、`app.demo-user.password`，未映射原规划的 `DEMO_USERNAME`、`DEMO_PASSWORD`。可在被 Git 忽略的本地配置中提供；两者非空白时启动即尝试初始化，不存在则写入 BCrypt 密码哈希与 UTC 时间，已存在则跳过。没有独立初始化开关或环境限制，测试环境应留空凭证。业务时区、业务缓存、CORS 和前端配置仍为规划项，不代表已经接入运行逻辑。
 
-配置由运行环境注入。后续 README 必须明确说明命令行或 IDEA 中如何提供环境变量；仓库只提供不含真实凭证的配置示例。
+配置由运行环境注入，命令行和 IDEA 配置方式见 [README](README.md)。仓库只提供不含真实凭证的配置示例。
 
 ## 7. Redis 与一致性边界
 

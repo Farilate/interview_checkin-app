@@ -1,6 +1,10 @@
 package com.example.checkin.service.impl;
 
 import com.example.checkin.redis.RedisKeys;
+import com.example.checkin.common.ErrorCode;
+import com.example.checkin.exception.BusinessException;
+import org.springframework.dao.DataAccessException;
+import org.jspecify.annotations.Nullable;
 import com.example.checkin.service.SessionService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -38,12 +42,15 @@ public class SessionServiceImpl implements SessionService {
 
     /**
      * 注入 Redis 客户端及固定会话有效期，单位为秒，缺省为 7200。
-     * <p>当前构造器未校验正数范围，运行配置应提供有效的正数。
+     * <p>非法有效期在启动时拒绝，避免登录后才发现无法创建会话。
      */
     public SessionServiceImpl(
             StringRedisTemplate redisTemplate,
             @Value("${app.session.ttl-seconds:7200}") long ttlSeconds) {
 
+        if (ttlSeconds <= 0 || ttlSeconds > Long.MAX_VALUE / 1000) {
+            throw new IllegalArgumentException("会话有效期须为正数且可转换为毫秒");
+        }
         this.redisTemplate = redisTemplate;
         this.sessionTtl = Duration.ofSeconds(ttlSeconds);
     }
@@ -69,11 +76,16 @@ public class SessionServiceImpl implements SessionService {
         String key = RedisKeys.session(sha256(token));
 
         // 同一次写入设置值和过期时间，值为十进制用户 ID 字符串，读取时不滑动续期。
-        redisTemplate.opsForValue().set(
-                key,
-                String.valueOf(userId),
-                sessionTtl
-        );
+        try {
+            redisTemplate.opsForValue().set(
+                    key,
+                    String.valueOf(userId),
+                    sessionTtl
+            );
+        } catch (DataAccessException exception) {
+            // 在会话存储边界分类，避免 Redis 异常被误判成 MySQL 故障。
+            throw new BusinessException(ErrorCode.REDIS_SESSION_UNAVAILABLE);
+        }
 
         return token;
     }
@@ -85,17 +97,31 @@ public class SessionServiceImpl implements SessionService {
      * @return Session 不存在或已经过期时返回 null
      */
     @Override
-    public Long getUserId(String token) {
+    public @Nullable Long getUserId(String token) {
         String key = RedisKeys.session(sha256(token));
 
-        String userId = redisTemplate.opsForValue().get(key);
+        String userId;
+        try {
+            userId = redisTemplate.opsForValue().get(key);
+        } catch (DataAccessException exception) {
+            throw new BusinessException(ErrorCode.REDIS_SESSION_UNAVAILABLE);
+        }
 
         if (userId == null) {
             return null;
         }
 
-        // 当前实现要求存储值可解析为 Long；损坏的值会抛出异常，而不会被视为合法身份。
-        return Long.valueOf(userId);
+        // 损坏或非正数身份不允许通过认证，撤销该会话后按未登录处理。
+        try {
+            long parsed = Long.parseLong(userId);
+            if (parsed > 0) {
+                return parsed;
+            }
+        } catch (NumberFormatException ignored) {
+            // 不回显 Redis 原值，统一清理无效会话。
+        }
+        deleteSession(token);
+        return null;
     }
 
     /**
@@ -106,7 +132,17 @@ public class SessionServiceImpl implements SessionService {
     @Override
     public void deleteSession(String token) {
         String key = RedisKeys.session(sha256(token));
-        redisTemplate.delete(key);
+        try {
+            redisTemplate.delete(key);
+        } catch (DataAccessException exception) {
+            throw new BusinessException(ErrorCode.REDIS_SESSION_UNAVAILABLE);
+        }
+    }
+
+    /** 与写入 Redis 的 TTL 使用同一个配置值，避免响应有效期与实际有效期分离。 */
+    @Override
+    public long getTtlSeconds() {
+        return sessionTtl.toSeconds();
     }
 
     /**
