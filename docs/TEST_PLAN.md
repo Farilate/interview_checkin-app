@@ -118,9 +118,10 @@
 | AuthControllerTest | 8 | 生产认证组件的 MVC 登录、当前用户、登出、重复登出、多会话隔离及 50301 响应 | Java 21 下 verify 通过 |
 | DemoDataTest | 1 | 生产 BCrypt 编码器验证公开演示 SQL 哈希，SQL 不含明文密码 | Java 21 下 clean verify 验证 |
 | HabitContractTest | 61 | 随机端口真实 HTTP；生产 Habit Controller/Service、鉴权配置、创建校验、重名、用户隔离、分页和故障分类；Mapper/认证依赖使用替身 | 本轮 verify 通过 |
+| CheckinRecordServiceTest | 3 | 单次取时跨午夜一致性、重复键回查成功、回查为空原异常对象传播 | 本轮定向测试通过 |
 | PersistenceIT | 10 | 真实 MySQL 中三个 Mapper、字段映射、分页、用户隔离、用户名/习惯名唯一、打卡唯一及复合外键 | 本轮 -Pmysql-it verify 重跑通过 |
 
-最近一次公共异常、认证与 Habit 代码验证使用 Java 21.0.12.1 / Maven 3.9.11 / Spring Boot 4.1.1，执行 `verify`：普通回归共 150 项，0 失败、0 错误、0 跳过，可执行 JAR 打包成功。报告位于 `backend/target/surefire-reports/`。认证及 Habit 测试使用外部存储替身，不连接真实 MySQL/Redis；生产业务仍使用真实 Mapper 和 Redis 客户端。
+此前一次公共异常、认证与 Habit 全量代码验证使用 Java 21.0.12.1 / Maven 3.9.11 / Spring Boot 4.1.1，执行 `verify`：普通回归共 150 项，0 失败、0 错误、0 跳过，可执行 JAR 打包成功。报告位于 `backend/target/surefire-reports/`。认证及 Habit 测试使用外部存储替身，不连接真实 MySQL/Redis；生产业务仍使用真实 Mapper 和 Redis 客户端。
 
 MySQL Server 具体版本缺少 SELECT VERSION() 证据，已移除原具体数字；下次真实联调查询后记录。PersistenceIT 的最近记录使用隔离 MySQL 测试实例及专用空库，执行 `-Pmysql-it clean verify`。10 项持久层测试通过，结束后独立查询三表行数均为 0，测试事务已回滚。当前规则为不同用户允许同名、同一用户名称唯一；现有测例不包含多线程并发验证。报告目录为 `backend/target/failsafe-reports/`，构建产物可能被后续 clean 清理。
 
@@ -159,7 +160,7 @@ Habit 创建、去重和分页接口已实现并补测，真实存储接口验�
 
 ## 11. 可选加分项：用户注册验收（主线完成后最后做）
 
-注册不属于主线必做验收；Phase 1–11 主线功能、联调、必做测试及演示准备全部完成后，才按单独授权最后实施。未实现注册不影响主线交付。以下仅为选择实施加分项后的验收计划，不计入现有 150 项测试结果；实施前先确定开放范围、成功响应、用户名冲突业务码及是否自动登录。
+注册不属于主线必做验收；Phase 1–11 主线功能、联调、必做测试及演示准备全部完成后，才按单独授权最后实施。未实现注册不影响主线交付。以下仅为选择实施加分项后的验收计划，不计入普通测试集（现有 153 项）；实施前先确定开放范围、成功响应、用户名冲突业务码及是否自动登录。
 
 | 场景 | 计划验收要求 |
 | --- | --- |
@@ -202,4 +203,8 @@ HabitContractTest 扩展后共 61 项（Habit 43 项、打卡 18 项），使用
 
 本轮 -Pmysql-it verify：普通测试 150 项、PersistenceIT 10 项，0 失败、0 错误、0 跳过。真实 MySQL 测试每例事务回滚，不等于真实 HTTP 并发验证或 Redis 登录联调；固定时钟的午夜两侧用例也不等于验证一次请求中跨午夜的行为。
 
-待修复：日期与 checkedInAt 分两次取时，可能在一次请求中跨日；索引名称 contains 检测可能误判，需完整识别。当前非正数 habitId 返回 40401 而非原设计 40001；POST 路径和响应字段见 API.md，原 PUT 及 created 标记并未实现。今日状态 GET、连续天数及缓存尚未实现，阶段 6 不标记为全部验收完成。
+已修复：只读取一次 Instant 并截断毫秒，再派生业务日期及 UTC checkedInAt；重复键处理删除 contains/索引名识别，按目标记录回查，查不到原样抛出异常。当前非正数 habitId 返回 40401 而非原设计 40001；POST 路径和响应字段见 API.md，原 PUT 及 created 标记并未实现。今日状态 GET、连续天数及缓存尚未实现，阶段 6 不标记为全部验收完成。
+
+新增 CheckinRecordServiceTest 三项定向回归：模拟时钟下一次读取跨午夜，断言实际只调用一次 instant 且写入/响应时间和日期一致；没有 JDBC 原因及索引名仍可通过回查返回原记录；回查为空使用 assertSame 验证抛出同一个原始 DuplicateKeyException。
+
+本轮仅运行 CheckinRecordServiceTest 与 HabitContractTest：合计 64 项全部通过，0 失败、0 错误、0 跳过；未重跑全量测试、真实 MySQL 集成或 HTTP 并发验收。普通测试集现有 153 项，新增数量不计作全量已执行结果。

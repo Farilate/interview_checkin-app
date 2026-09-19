@@ -10,8 +10,6 @@ import com.example.checkin.service.CheckinRecordService;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DuplicateKeyException;
 
-import java.sql.SQLException;
-
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -52,9 +50,10 @@ public class CheckinRecordServiceImpl
             );
         }
 
-        // “今天”按照业务时区确定。
-        LocalDate checkinDate =
-                LocalDate.now(businessClock);
+        // 只读取一次时间，先对齐 DATETIME(3) 毫秒精度，再派生日期和 UTC 时间。
+        // 即使后续查询或写入跨过业务午夜，本次请求仍使用同一个瞬间，避免日期错配。
+        Instant now = businessClock.instant().truncatedTo(ChronoUnit.MILLIS);
+        LocalDate checkinDate = now.atZone(businessClock.getZone()).toLocalDate();
 
         // 重复请求直接返回已有记录，使打卡接口具备幂等性。
         CheckinRecord existing =
@@ -67,10 +66,6 @@ public class CheckinRecordServiceImpl
         if (existing != null) {
             return toResponse(existing);
         }
-
-        // 数据库存 DATETIME(3)，因此统一截断到毫秒精度。
-        Instant now = businessClock.instant()
-                .truncatedTo(ChronoUnit.MILLIS);
 
         CheckinRecord record = new CheckinRecord();
         record.setUserId(userId);
@@ -88,17 +83,8 @@ public class CheckinRecordServiceImpl
             return toResponse(record);
         } catch (DuplicateKeyException e) {
 
-            /*
-             * 两个并发请求可能同时判断“今天尚未打卡”，
-             * 此时数据库唯一约束负责保证最终只插入一条记录。
-             *
-             * 只有确认是“同用户 + 同习惯 + 同日期”唯一键冲突时，
-             * 才按重复打卡处理，不能吞掉其他数据库唯一键异常。
-             */
-            if (!isCheckinDateConflict(e)) {
-                throw e;
-            }
-
+            // 并发请求可能同时通过预查询。以目标三元组的实际记录确认幂等结果，
+            // 不解析异常消息、索引名或驱动错误格式；数据库唯一约束仍负责最终去重。
             CheckinRecord existingRecord =
                     checkinRecordMapper.findByUserHabitAndDate(
                             userId,
@@ -107,8 +93,7 @@ public class CheckinRecordServiceImpl
                     );
 
             if (existingRecord == null) {
-                // 理论上唯一键冲突后应能查到获胜请求插入的记录；
-                // 查不到说明出现了其他异常情况，不伪装成正常幂等响应。
+                // 无法确认目标记录已存在，保留并抛出原异常，不伪装成重复成功。
                 throw e;
             }
 
@@ -131,28 +116,4 @@ public class CheckinRecordServiceImpl
         );
     }
 
-    /**
-     * 判断异常是否确实来自每日打卡唯一约束。
-     */
-    private boolean isCheckinDateConflict(
-            DuplicateKeyException exception) {
-
-        Throwable cause = exception;
-
-        while (cause != null) {
-            if (cause instanceof SQLException sqlException) {
-                if (sqlException.getErrorCode() == 1062
-                        && "23000".equals(sqlException.getSQLState())
-                        && sqlException.getMessage() != null
-                        && sqlException.getMessage()
-                        .contains("uk_checkin_user_habit_date")) {
-                    return true;
-                }
-            }
-
-            cause = cause.getCause();
-        }
-
-        return false;
-    }
 }

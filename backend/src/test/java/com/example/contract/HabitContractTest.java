@@ -372,7 +372,7 @@ class HabitContractTest {
         verify(records, times(2)).findByUserHabitAndDate(7L, 101L, winner.getCheckinDate());
     }
 
-    /** 即使报告指定约束冲突，回查不到获胜记录也不能伪装成功。 */
+    /** 即使发生重复键异常，回查不到目标记录也不能伪装成功。 */
     @Test
     void checkinConflictWithoutWinnerIsInternalError() throws Exception {
         allowCheckin();
@@ -380,7 +380,7 @@ class HabitContractTest {
         check(send("POST", "/101/checkins", "owner", null), 500, 50001);
     }
 
-    /** 普通其他唯一键冲突、缺失 JDBC 原因、错误号或 SQLState 不符不能返回重复成功。 */
+    /** 重复键异常的格式不影响判断；目标记录不存在时各种消息都必须继续报错。 */
     @Test
     void checkinUnrelatedFailuresRemainErrors() throws Exception {
         allowCheckin();
