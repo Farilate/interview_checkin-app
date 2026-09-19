@@ -14,6 +14,8 @@ database/init.sql
 
 持久层使用 MyBatis Spring Boot Starter 4.1.0，Mapper 位于 `backend/src/main/java/com/example/checkin/mapper/`。连接由 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 注入；应用不自动初始化表。连接会话设为 UTC，时间字段仍由业务调用方显式提供 UTC 值。真实 MySQL 验证方式见 README 的 Phase 2 集成测试说明。
 
+演示账户由可选的 `database/demo-data.sql` 手工导入，应用启动不创建账户。脚本只写 BCrypt 哈希与 UTC 时间；已有 demo_user 时不覆盖密码，不作为并发注册流程。`init.sql` 仍只负责表结构。
+
 ## 2. users
 
 | 字段 | 类型 | 默认/含义 |
@@ -30,6 +32,8 @@ database/init.sql
 - `UNIQUE uk_users_username(username)`
 
 数据库不得存储明文密码或 Session Token。
+
+后续正式注册复用 users 表和 `uk_users_username`，本次不变更 SQL。用户名规范化后写入，密码保存 BCrypt 哈希；并发重复用户名由数据库最终拒绝，Service 识别对应约束并返回专用冲突错误。是否注册后创建 Redis Session 尚待确定；不能将跨存储失败视为天然可共同回滚。
 
 ## 3. habits
 
@@ -88,7 +92,7 @@ database/init.sql
 
 应用层可以在插入前查询是否已打卡以优化正常重复请求，但该查询不能替代数据库唯一约束。
 
-打卡成功后的今日状态与连续天数应基于 MySQL 真实记录计算；不得使用可能过期的 Redis 值决定本次写操作结果。
+打卡写响应中的今日状态基于 MySQL 真实记录；不返回连续天数字段。连续天数由独立 GET /streak 根据真实记录计算，缓存按后续阶段策略处理。
 
 ## 6. Redis Key 设计
 

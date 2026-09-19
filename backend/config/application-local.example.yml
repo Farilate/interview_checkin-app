@@ -1,0 +1,12 @@
+# 复制为同目录 application-local.yml，填写本地配置；真实文件已被 Git 忽略。
+# 从 backend 目录启动时读取 ./config/；本文件不参与 Maven 资源打包。
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/checkin?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true}
+    username: ${DB_USERNAME:checkin_app}
+    password: ${DB_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}

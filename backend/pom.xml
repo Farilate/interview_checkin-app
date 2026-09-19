@@ -59,6 +59,17 @@
         </dependency>
     </dependencies>
     <build>
+        <!-- 本地配置只从外部 config 目录读取；即使误放回 resources 也不能打入 JAR。 -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <excludes>
+                    <exclude>**/application-local*.yml</exclude>
+                    <exclude>**/application-local*.yaml</exclude>
+                    <exclude>**/application-local*.properties</exclude>
+                </excludes>
+            </resource>
+        </resources>
         <plugins>
             <!-- 显式声明注解处理器，让 Maven 编译时生成 Model 的 getter/setter。 -->
             <plugin>

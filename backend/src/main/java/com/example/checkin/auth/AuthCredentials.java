@@ -6,7 +6,7 @@ import com.example.checkin.exception.BusinessException;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
-/** 登录和演示账户共用的凭证边界，确保初始化的账户也符合登录规则。 */
+/** 登录凭证的规范化与输入边界；未来注册应复用同一规则，本阶段不提供注册接口。 */
 public final class AuthCredentials {
     private AuthCredentials() { }
 

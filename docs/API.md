@@ -55,7 +55,7 @@ ID 使用十进制正整数字符串，登录响应与 `/auth/me` 均遵循该�
 - `ErrorCode` 集中管理 HTTP 状态、业务码和安全提示，`BusinessException` 只携带预定义错误码。
 - 映射方向为“明确业务原因或异常类型 → ErrorCode → HTTP 状态”，不提供从 HTTP 状态反推业务错误的方法。业务异常直接使用自身错误码；Redis 会话故障在会话边界转换为 50301，数据库可用性异常保持 50302。
 - `GlobalExceptionHandler` 处理 MVC 参数绑定、`@Valid` 请求体校验、方法参数校验、JSON 解析、404、405、406、415、业务和数据库异常；405 保留 `Allow` 响应头。
-- JSON 请求严格拒绝 DTO 未声明字段和尾随内容；后续业务 DTO 不声明 `userId` 等服务端字段。查询参数与无 Body 接口的专属限制在对应 Controller 实现时落实。
+- JSON DTO 接口严格拒绝未知字段和尾随内容；无 Body 接口不读取请求体，客户端不应发送额外请求体。查询参数仅绑定接口明确声明的参数；额外 Body 或查询参数中的 userId 不作为身份来源，不增加全局请求体检测 Filter。
 - `PageRequest` 默认 page=1/pageSize=20，校验 page≥1、1≤pageSize≤100；偏移量使用 long，避免整数乘法溢出。
 - 连接及临时数据访问/事务故障返回 50302；未分类数据库异常（包括未识别的唯一键冲突）返回 50001，不擅自映射成业务成功。具体重名或重复打卡约束的识别在业务阶段处理。
 - `ApiErrorController` 处理容器错误分派，替代默认 HTML 错误页；响应不包含异常原文、SQL、凭证和堆栈。API 响应统一设置 `Cache-Control: no-store`。
@@ -65,6 +65,8 @@ ID 使用十进制正整数字符串，登录响应与 `/auth/me` 均遵循该�
 - 验证用 `/probe/*` 接口只存在于测试目录，不打包进生产应用；其测试结果不替代业务接口验收。
 
 ## 2. 登录
+
+注册接口已列入后续规划，拟使用 `POST /api/v1/auth/register`，当前未实现且未加入匿名放行列表。注册请求拟只包含 username/password，沿用现有凭证规则；成功状态、响应字段、自动登录策略和用户名冲突业务码在实施前确定。用户名冲突规划为 HTTP 409，不复用习惯名称冲突的 40901。完整范围见 IMPLEMENTATION_PLAN.md 第 6 节，以下登录接口仍为当前已实现契约。
 
 ### `POST /api/v1/auth/login`
 
@@ -106,7 +108,7 @@ Response：HTTP 200。只有 Redis Session 写入成功后才返回登录成功�
 
 ### `GET /api/v1/auth/me`
 
-需要登录，无需请求体。拦截器读取 Redis 会话，将用户 ID 写入当前请求属性，服务层再按该 ID 查询 MySQL；不从客户端参数取得身份。
+需要登录。客户端不应发送 Body，服务端不读取 Body；多余内容不用于确定身份。拦截器读取 Redis 会话，将用户 ID 写入当前请求属性，服务层再按该 ID 查询 MySQL；不从客户端参数取得身份。
 
 HTTP 200 当前响应：
 
@@ -122,7 +124,7 @@ HTTP 200 当前响应：
 
 ### `POST /api/v1/auth/logout`
 
-需要登录，携带 `Authorization: Bearer <token>`，无需请求体。删除当前令牌摘要对应的 Redis 会话，成功返回 HTTP 200：
+需要登录，携带 `Authorization: Bearer <token>`。客户端不应发送 Body，服务端不读取 Body。删除当前令牌摘要对应的 Redis 会话，成功返回 HTTP 200：
 
 ```json
 { "code": 0, "message": "ok", "data": null }
@@ -132,9 +134,11 @@ HTTP 200 当前响应：
 
 ### 当前认证实现边界
 
+在当前生产 MVC 默认资源映射下，未携带 Authorization 访问不存在的 `/api/v1/**` 路径（不包括匿名登录地址）时，认证拦截先执行，返回 HTTP 401 / 40101，而非 404。同一路径携带有效 Token 并通过用户存在性检查后返回 HTTP 404 / 40400；未受保护的未知路径也返回 40400。这三种情况均由加载生产 WebMvcConfig 和 AuthInterceptor 的真实 HTTP 测试锁定。不要将“所有未知地址都返回 404”作为契约。
+
 `/api/v1/**` 注册认证拦截器，仅排除 `/api/v1/auth/login`。请求属性只在当前请求内有效，不使用 ThreadLocal。会话读取不续期，TTL 来自 `app.session.ttl-seconds`，YAML 映射环境变量为 `SESSION_TTL_SECONDS`，默认 7200 秒。当前未配置跨域规则或单独处理 OPTIONS，H5 跨域预检尚待联调。
 
-用户名 trim 后须为 3–32 位 ASCII 字母、数字或下划线，再统一转小写。密码须非空白且为 8–72 个 UTF-8 字节，不 trim。登录与演示账户初始化共用这些规则。Session TTL 非正数或不能安全转换为毫秒时在启动阶段拒绝。
+用户名 trim 后须为 3–32 位 ASCII 字母、数字或下划线，再统一转小写。密码须非空白且为 8–72 个 UTF-8 字节，不 trim。演示 SQL 中的账户也遵循这些规则。Session TTL 非正数或不能安全转换为毫秒时在启动阶段拒绝。
 
 ## 3. 创建打卡项
 
@@ -220,7 +224,7 @@ Request：无 Body；不接受 `userId`、日期、时间戳或连续天数。
 
 该接口按“当前用户 + 当前习惯 + 当前业务日期”定义资源，因此重复调用具有幂等语义。
 
-首次打卡 Response：HTTP 200。
+首次打卡 Response：HTTP 200。Phase 6 仅返回打卡结果，连续天数由 Phase 7 的独立接口负责。
 
 ```json
 {
@@ -233,9 +237,7 @@ Request：无 Body；不接受 `userId`、日期、时间戳或连续天数。
     "businessZone": "Asia/Shanghai",
     "checkedIn": true,
     "created": true,
-    "checkedInAt": "2026-09-17T02:00:00.000Z",
-    "streakDays": 3,
-    "streakEndDate": "2026-09-17"
+    "checkedInAt": "2026-09-17T02:00:00.000Z"
   }
 }
 ```
@@ -245,7 +247,7 @@ Request：无 Body；不接受 `userId`、日期、时间戳或连续天数。
 ```json
 {
   "code": 0,
-  "message": "今日已打卡",
+  "message": "ok",
   "data": {
     "recordId": "501",
     "habitId": "101",
@@ -253,9 +255,7 @@ Request：无 Body；不接受 `userId`、日期、时间戳或连续天数。
     "businessZone": "Asia/Shanghai",
     "checkedIn": true,
     "created": false,
-    "checkedInAt": "2026-09-17T02:00:00.000Z",
-    "streakDays": 3,
-    "streakEndDate": "2026-09-17"
+    "checkedInAt": "2026-09-17T02:00:00.000Z"
   }
 }
 ```
@@ -349,6 +349,6 @@ Response：HTTP 200。
 
 打卡按钮提交中可禁用以改善体验，但并发正确性不能依赖前端按钮状态。
 
-`PUT /checkins/today` 成功后，页面直接使用写接口响应中的 `checkedIn` 和 `streakDays` 更新，不需要立即再请求 GET 覆盖该结果。
+`PUT /checkins/today` 成功后使用响应中的 checkedIn、created 更新打卡状态；message 统一为 ok，“今日已打卡”由前端根据 created=false 展示。连续天数在 Phase 7 通过独立 GET /streak 查询，PUT 响应不包含 streakDays/streakEndDate。
 
 独立 GET 使用 Redis 短 TTL 缓存；若缓存刚好仍是旧值，后续会在短 TTL 过期或写操作失效缓存后回到 MySQL 真实结果。页面重新激活或跨日时应重新查询，以后端业务日期为准。

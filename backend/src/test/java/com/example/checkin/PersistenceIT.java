@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *     <li>MyBatis 的字段映射、主键回填是否正确。</li>
  * </ul>
  * <p>本测试不负责创建数据库和数据表。
- * 运行测试之前，application-local.yml 指向的数据库中必须已经存在：
+ * 运行测试之前，backend/config/application-local.yml 指向的专用测试库中必须已经存在：
  * <ul>
  *     <li>users</li>
  *     <li>habits</li>
@@ -47,7 +47,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <pre>
  * application.yml
  *       +
- * application-local.yml
+ * ./config/application-local.yml（工作目录为 backend）
  * </pre>
  * 中配置的数据库。
  * <p>整个测试类使用 {@link Transactional}。

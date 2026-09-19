@@ -4,7 +4,7 @@
 
 ## 当前进度
 
-阶段 1–3 的项目骨架、MySQL 持久层及统一响应已具备；阶段 4 已新增登录、查询当前用户、登出、Redis Session 和演示账户初始化代码，尚未完成登录模块验收。
+阶段 1–3 的项目骨架、MySQL 持久层及统一响应已具备；阶段 4 已新增登录、查询当前用户、登出、Redis Session 代码及独立演示 SQL，尚未完成登录模块验收。
 习惯、打卡业务及前端仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续实现。当前接口契约见 [API 文档](docs/API.md)。
 
 ## 后端环境与启动
@@ -20,10 +20,10 @@
 
 ```powershell
 cd backend
-$env:JAVA_HOME = 'C:\Users\Farilate\.jdks\ms-21.0.12.1' # 按实际 JDK 21 路径修改
+$env:JAVA_HOME = 'C:\path\to\jdk-21' # 按实际 JDK 21 路径修改
 $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 .\mvnw.cmd clean verify
-# 启动前按下文初始化数据库并设置 DB_URL、DB_USERNAME、DB_PASSWORD。
+# 启动前按下文初始化数据库，通过环境变量或外部本地配置提供数据库连接。
 .\mvnw.cmd spring-boot:run
 ```
 
@@ -39,18 +39,18 @@ macOS/Linux 使用 JDK 21，在 `backend/` 执行 `sh ./mvnw clean verify` 和 `
 停止进程。
 
 IDEA：将 `backend/pom.xml` 添加为 Maven 项目，项目 SDK、Maven 导入及运行 JDK 均选择 21；Maven 使用 Wrapper；运行
-`com.example.checkin.CheckinApplication`。
+`com.example.checkin.CheckinApplication`，Working directory 设置为项目的 `backend/`。
 
 ## 环境变量
 
-配置来自启动进程继承的操作系统环境变量，或 IDEA Run Configuration 的 Environment variables。本项目不会自动加载 `.env`。
+配置可来自进程环境变量（包括 IDEA Run Configuration 的 Environment variables），也可来自外部 `backend/config/application-local.yml`。本项目不会自动加载 `.env`。下表描述默认 application.yml 的环境变量映射；若外部 local 文件直接设置对应的 `spring.datasource.*` 属性，则无需重复提供 DB_* 变量。
 
 | 变量                | 默认值          | 当前用途                                             |
 |---------------------|-----------------|------------------------------------------------------|
 | `JAVA_HOME`         | 无              | Maven 使用的 JDK 21 路径                             |
 | `DB_URL`            | 无，必填        | MySQL JDBC URL，包含明确的数据库名                   |
 | `DB_USERNAME`       | 无，必填        | 数据库用户                                           |
-| `DB_PASSWORD`       | 无，必填        | 数据库密码，仅从运行环境注入                         |
+| `DB_PASSWORD`       | 无默认密码        | 通过环境变量注入，或在不提交、不打包的外部 local 配置中设置 `spring.datasource.password` |
 | `SERVER_PORT`       | `8080`          | HTTP 监听端口                                        |
 | `REDIS_HOST` | `localhost` | 登录会话 Redis 地址 |
 | `REDIS_PORT` | `6379` | Redis 端口 |
@@ -66,11 +66,21 @@ $env:SERVER_PORT = '8081'
 
 Redis 地址和 Session TTL 已接入。Redis 认证及库编号可通过 Spring 配置属性 `spring.data.redis.username`、`spring.data.redis.password`、`spring.data.redis.database` 提供，或使用对应标准环境变量 `SPRING_DATA_REDIS_USERNAME`、`SPRING_DATA_REDIS_PASSWORD`、`SPRING_DATA_REDIS_DATABASE`；当前 YAML 未映射简写变量 `REDIS_USERNAME`、`REDIS_PASSWORD`、`REDIS_DATABASE`。业务缓存 TTL、CORS 和业务时区运行逻辑尚未接入。
 
-演示账户读取 `app.demo-user.username`、`app.demo-user.password`，可在 Git 忽略的 `application-local.yml` 中配置；当前未映射 `DEMO_USERNAME`、`DEMO_PASSWORD`。两者均非空白时，应用启动会自动创建不存在的账户；已有账户不会重设密码，未配置则跳过。密码只以 BCrypt 哈希写入 MySQL。初始化器没有独立开关，测试若启动完整应用也可能触发，因此测试环境应留空演示凭证。真实凭证不得提交到 Git；本地 `.env*` 和 `application-local.*` 已忽略。
+真实本地配置放在 `backend/config/application-local.yml`，不再放进 `src/main/resources/`。可复制 [配置示例](backend/config/application-local.example.yml) 后填写；真实文件由 Git 忽略，也不参与 Maven 打包。示例通过 `${DB_PASSWORD}` 引用环境变量；个人 local 文件也可以直接填写 `spring.datasource.password`，但不得提交或分发。若要用环境变量强制覆盖 local 中的直接配置，使用 `SPRING_DATASOURCE_PASSWORD`。应用启动不创建用户，原演示初始化配置已取消。
+
+启动 Maven、JAR 或 IDEA 时均以 `backend/` 为工作目录，Spring Boot 读取外部 `./config/`。若必须从仓库根目录启动，可设置 `SPRING_CONFIG_ADDITIONAL_LOCATION=optional:file:./backend/config/`。复制示例后填写数据库配置，或继续使用环境变量。打包分发时仅分发 JAR 与无秘密示例，不包含真实本地配置。
+
+## 演示账户准备
+
+在已执行 `database/init.sql` 的本地或隔离演示库中，手工执行 [database/demo-data.sql](database/demo-data.sql)。它只保存 BCrypt 哈希；已有 `demo_user` 时跳过，不覆盖密码。脚本按单次手工执行设计，不作为并发注册接口。
+
+公开演示凭证：用户名 `demo_user`，密码 `DemoOnly123!`。这是可公开的本地演示数据，不能用于生产或复用为真实账户密码；已有同名账户时继续使用其原密码。
+
+正式注册已纳入[实施计划第 6 节](docs/IMPLEMENTATION_PLAN.md)，作为独立扩展阶段后续开发，当前不提供注册 API。是否公开注册、注册后是否自动登录及响应契约仍待实施前确定。
 
 ## 登录、当前用户和登出
 
-启动前准备已建表的 MySQL、可访问的 Redis 及已有账户或演示账户配置。以下是当前后端行为，不代表已通过联调：
+启动前准备已建表的 MySQL、可访问的 Redis 及已有账户或手工导入的演示账户。以下是当前后端行为，不代表已通过联调：
 
 1. `POST /api/v1/auth/login`：提交 JSON 用户名和密码，成功返回 `data.token`、`tokenType`、`expiresIn` 和 `user`。用户名 trim 后转小写，密码不 trim。
 2. `GET /api/v1/auth/me`：携带 `Authorization: Bearer <token>`，返回 `data.id` 和 `data.username`；ID 为十进制字符串。
@@ -105,7 +115,7 @@ $env:DB_PASSWORD = $credential.GetNetworkCredential().Password
 
 IDEA 运行时在 Environment variables 中配置相同变量。MySQL 会话时区设为 UTC；Model 中 `LocalDateTime` 字段须由后续业务层按
 UTC 填入，`LocalDate` 保存业务日期。Mapper 使用参数绑定；习惯和打卡记录查询均包含用户 ID，后续 Service 必须传入服务端身份，不能信任前端
-userId。账户初始化和登录已执行用户名 trim 及小写规范化；用户名限制为 3–32 位 ASCII 字母、数字或下划线，密码限制为 8–72 个 UTF-8 字节。数据库采用 ASCII 二进制排序规则进行精确比较。
+userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3–32 位 ASCII 字母、数字或下划线，密码限制为 8–72 个 UTF-8 字节。数据库采用 ASCII 二进制排序规则进行精确比较。
 
 ## Phase 2 集成测试
 
@@ -113,7 +123,7 @@ userId。账户初始化和登录已执行用户名 trim 及小写规范化；�
 开启事务并在结束后回滚，可重复执行；不会自动建库、建表，也不包含多线程并发测试。
 
 1. 创建专用测试库，并在其中执行 `database/init.sql`。
-2. 在 Git 忽略的 `backend/src/main/resources/application-local.yml` 配置测试数据源，或通过 `SPRING_DATASOURCE_URL`、
+2. 在 Git 忽略的 `backend/config/application-local.yml` 配置测试数据源，或通过 `SPRING_DATASOURCE_URL`、
    `SPRING_DATASOURCE_USERNAME`、`SPRING_DATASOURCE_PASSWORD` 环境变量覆盖数据源。不要将测试指向业务数据库，真实密码不得提交。
 3. 使用 JDK 21，在 `backend/` 执行：
 
@@ -121,14 +131,13 @@ userId。账户初始化和登录已执行用户名 trim 及小写规范化；�
 .\mvnw.cmd -B -ntp -Pmysql-it clean verify
 ```
 
-普通 `clean verify` 执行 56 项公共 HTTP 契约检查和 41 项认证与账户初始化回归并打包，不执行 `PersistenceIT`；报告位于 `backend/target/surefire-reports/`。启用 `mysql-it` 后额外运行 10 项真实 MySQL 持久层测试，报告位于 `backend/target/failsafe-reports/`。
+普通 `clean verify` 执行 58 项公共 HTTP 契约检查和 30 项认证回归和 1 项演示哈希验证并打包，不执行 `PersistenceIT`；报告位于 `backend/target/surefire-reports/`。启用 `mysql-it` 后额外运行 10 项真实 MySQL 持久层测试，报告位于 `backend/target/failsafe-reports/`。
 
-持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，不代表业务接口或 HTTP 并发验收已完成。测试前应留空演示账户初始化凭证。
+持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，不代表业务接口或 HTTP 并发验收已完成。应用启动不再执行账户写入，测试仍必须指向专用测试库。
 
 ## 当前技术与业务约定
 
-- Java 版本统一为 21；本机 Microsoft JDK 路径为 `C:\Users\Farilate\.jdks\ms-21.0.12.1`，IDEA SDK、Maven JDK 与 `JAVA_HOME`
-  均应选择它。
+- Java 版本统一为 21；JAVA_HOME、IDEA Project SDK 和 Maven JDK 均使用 JDK 21。
 - Model 使用 Lombok `@Getter`、`@Setter`，Maven 显式配置注解处理器，版本由 Spring Boot 管理。重新导入 Maven 项目即可获取依赖；IDEA
   编译需要启用注解处理。配置依据：[Lombok Maven 说明](https://projectlombok.org/setup/maven)。
 - 不同用户允许同名习惯，同一用户内名称唯一；数据库约束为 `uk_habits_user_name(user_id, name)`，按 `utf8mb4_0900_ai_ci` 排序规则判重。
@@ -141,8 +150,8 @@ userId。账户初始化和登录已执行用户名 trim 及小写规范化；�
 
 ## 验证结果与限制
 
-2026-09-19，Java 21.0.12.1 / Maven 3.9.11 下补充测试后的 `verify` 构建成功：97 项测试全部通过，0 失败、0 错误、0 跳过。其中公共 HTTP 契约测试 56 项、认证与账户初始化回归 41 项；认证回归使用外部存储替身。
+2026-09-19，Java 21.0.12.1 / Maven 3.9.11 下生产路由边界补测后的 `verify` 构建成功：89 项测试全部通过，0 失败、0 错误、0 跳过。其中公共 HTTP 契约测试 58 项、认证回归 30 项、演示哈希验证 1 项；认证回归使用外部存储替身。
 
-真实 MySQL 的 10 项持久层测试在此前回归中通过，认证修复后未重跑。真实 MySQL/Redis 登录联调、实际会话到期、断网故障、演示账户并发初始化和 H5 尚未验收，阶段 4 因此尚未完成全部验收。CORS 留待 H5 联调阶段处理。
+真实 MySQL 的 10 项持久层测试在此前回归中通过，认证修复后未重跑。真实 MySQL/Redis 登录联调、实际会话到期、断网故障、演示 SQL 实际导入和 H5 尚未验收，阶段 4 因此尚未完成全部验收。CORS 留待 H5 联调阶段处理。
 
 测试覆盖、报告位置和剩余验收项统一维护在 [测试计划](docs/TEST_PLAN.md) 第 9–10 节。

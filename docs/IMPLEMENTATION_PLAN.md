@@ -9,10 +9,11 @@
 | Phase 1：Spring Boot 项目初始化 | 核对并固定 JDK/Spring Boot 兼容版本；创建 `backend/`、`pom.xml`、Maven Wrapper、启动入口、基础配置与 `.gitignore` 补充 | Maven 构建通过；环境变量来源明确；不提前写登录/打卡业务 |
 | Phase 2：MySQL 表和基础持久层 | 创建 `database/init.sql`；落实 users、habits、checkin_records、复合外键及唯一索引；引入 MyBatis 和 Mapper | 在真实 MySQL 空库执行脚本成功；重复打卡三元组被数据库拒绝；用户名唯一约束有效；同用户习惯名称唯一、跨用户同名允许 |
 | Phase 3：统一响应和异常处理 | 统一 DTO、参数校验、全局异常处理、HTTP/code 映射 | 合法与非法请求均符合 `API.md`；内部错误不泄露 SQL、凭证或堆栈 |
-| Phase 4：登录和 Redis 登录态 | BCrypt 验证；随机 Token；Redis Session；当前用户查询与上下文；登出；初始化演示账户 | 正确/错误密码、账户不存在、Session 过期均符合契约；Redis 中 Session 有真实 TTL；前端 userId 不能替代登录身份 |
+| Phase 4：登录和 Redis 登录态 | BCrypt 验证；随机 Token；Redis Session；当前用户查询与上下文；登出；独立 SQL 准备演示账户 | 正确/错误密码、账户不存在、Session 过期均符合契约；Redis 中 Session 有真实 TTL；前端 userId 不能替代登录身份 |
+| 注册扩展阶段（待单独授权） | 正式注册 API、独立 DTO、凭证校验、BCrypt、用户持久化及用户名冲突处理；具体规则见第 6 节 | 新账户真实写入 MySQL 并可登录；并发同名仅创建一个账户；错误响应一致；注册后登录策略确定后验证 |
 | Phase 5：打卡项管理 | 创建习惯、当前用户分页列表、名称校验及用户隔离 | 数据真实写入 MySQL；刷新后仍可查询；不同用户互相隔离；空列表正常 |
 | Phase 6：每日打卡和并发安全 | 统一 Clock/业务日期；实现 `PUT /habits/{habitId}/checkins/today`；事务插入和指定唯一约束冲突处理；今日状态查询 | 首次 `created=true`；重复/并发 `created=false`；数据库最终只有一条；其他数据库异常不得伪装成功 |
-| Phase 7：连续打卡算法 | 后端按 `LocalDate` 计算 streak；完善 streak GET 接口和打卡响应 | 验证今天/昨天锚点、断签、跨月、跨年；结果不使用总次数代替 |
+| Phase 7：连续打卡算法 | 后端按 `LocalDate` 计算 streak；实现独立 streak GET 接口 | 验证今天/昨天锚点、断签、跨月、跨年；结果不使用总次数代替 |
 | Phase 8：Redis 业务缓存 | 接入 today/streak 短 TTL 缓存；Cache Miss 回源；打卡提交后删除相关缓存；业务缓存失败回退 MySQL | 第二次查询可命中缓存；手动删除 Key 后能回源；打卡后旧缓存被失效；缓存故障不影响已提交 MySQL 数据 |
 | Phase 9：UniApp 前端 | 创建 Vue 3 UniApp H5 工程；统一请求层、登录页、列表页、创建表单和打卡交互 | H5 构建成功；页面真实请求后端；处理 401、503、提交中、空列表和错误提示 |
 | Phase 10：前后端联调 | 跑通登录 → 创建 → 查询 → 打卡 → 今日状态/连续天数 → 刷新 | 浏览器 Network、MySQL 三表和 Redis 三类 Key 相互印证；刷新后业务结果仍存在；多用户隔离有效 |
@@ -20,7 +21,7 @@
 
 ## 2. 当前进度与已确认决策
 
-当前进度：阶段 1–3 已有实现；阶段 4 已新增 `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`、BCrypt、Redis 固定 TTL 会话及演示账户初始化。阶段 4 已修复输入边界、登录响应字段、ID 字符串格式、Redis 故障分类及已删除用户会话清理，并新增认证回归测试。真实 MySQL/Redis 登录与登出联调仍待执行，因此尚未完成阶段验收。阶段 5–11 仍待按用户授权逐步实施，CORS 随 H5 联调处理。
+当前进度：阶段 1–3 已有实现；阶段 4 已新增 `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`、BCrypt、Redis 固定 TTL 会话及独立演示 SQL。阶段 4 已修复输入边界、登录响应字段、ID 字符串格式、Redis 故障分类及已删除用户会话清理，并新增认证回归测试。真实 MySQL/Redis 登录与登出联调仍待执行，因此尚未完成阶段验收。阶段 5–11 仍待按用户授权逐步实施，CORS 随 H5 联调处理。
 
 阶段 4 的验收补充包含：登出删除当前会话、其他会话不受影响、登出后原令牌被拒绝、重复登出返回当前约定的 401；详见 `API.md` 和 `TEST_PLAN.md`。
 
@@ -32,7 +33,7 @@
 - 今天未打卡但昨天已打卡时，连续天数保留截至昨天。
 - 每日打卡接口：`PUT /api/v1/habits/{habitId}/checkins/today`。
 - 重复打卡按幂等成功返回，`created=false`。
-- 本期不做注册；使用显式初始化演示账户。
+- 当前不做注册；手工执行独立 SQL 准备演示账户，后续注册方向见第 6 节。
 - 不同用户允许同名习惯；同一用户内习惯名称唯一。
 - Session 默认 TTL：7200 秒。
 - 业务缓存采用短 TTL Cache-Aside；MySQL 为最终事实来源。
@@ -41,7 +42,7 @@
 
 Phase 2 提供真实持久层；Phase 4 开始需要真实 MySQL 和 Redis；Phase 5 以后依赖后端当前用户身份。
 
-Phase 6 先解决每日打卡写入安全、幂等和今日状态；Phase 7 再完成连续天数的完整算法。Phase 6 不用假数据伪造 `streakDays` 已经完成。
+Phase 6 先解决每日打卡写入安全、幂等和今日状态；Phase 7 再完成连续天数的完整算法。Phase 6 的 PUT 响应不包含 streakDays/streakEndDate；Phase 7 通过独立 GET /streak 返回连续天数，不向打卡响应追加这些字段。
 
 Phase 8 只增加业务查询缓存；Redis Session 已在 Phase 4 中真实使用。Phase 9 必须在后端接口可用后再接入，不用 Mock 假装核心业务已完成。
 
@@ -68,8 +69,32 @@ Phase 8 只增加业务查询缓存；Redis Session 已在 Phase 4 中真实使�
 | Spring Boot | 4.1.1 |
 | Maven | Wrapper 固定 3.9.11 |
 | MyBatis Starter | 4.1.0 |
-| MySQL | SQL 要求 8.0+；此前隔离测试实例记录为 26.7.0 |
+| MySQL | SQL 要求 8.0+；实际 Server 版本待下次联调执行 SELECT VERSION() 记录 |
 | Redis | 认证代码已接入，实际运行版本与联调证据待记录 |
 | Node / npm、UniApp 启动方式 | 前端阶段确定 |
 
 这些属于开发环境约定，不改变已经确认的业务规则。启动配置见 README，测试证据及限制见 TEST_PLAN.md 第 9–10 节。
+
+## 6. 后续正式注册规划（本次不实现）
+
+用户注册已纳入后续功能范围，尚未实现。作为独立扩展阶段，不重编号 Phase 5–11，也不因列入计划而自动开始开发。实施前先完成当前 MySQL、Redis/Memurai 与 HTTP 登录、登出和 TTL 的真实联调；与其他待开发阶段的具体顺序由后续授权确定。
+
+### 6.1 后端范围
+
+- 规划 `POST /api/v1/auth/register`，使用独立请求 DTO，只接收用户名和密码，不接受客户端指定用户 ID、密码哈希或创建时间。
+- 复用当前凭证规则：用户名 trim 后为 3–32 位 ASCII 字母、数字或下划线，再转小写；密码非空白、8–72 个 UTF-8 字节且不 trim。
+- Controller 接收和校验请求，Service 处理注册，Mapper 写入 users；使用 BCrypt 保存密码，时间由服务端按 UTC 生成。禁止恢复启动时自动创建用户的机制。
+- 复用 `uk_users_username` 保证并发同名只创建一个账户。只有明确识别为用户名冲突时返回 HTTP 409，新增业务错误码在实施时确定，不复用习惯重名的 40901；其他数据库异常沿用现有分类。
+- 注册成功后可以使用现有登录接口；响应沿用 code/message/data，用户 ID 为字符串，不包含明文密码或密码哈希。
+
+### 6.2 实施前待确定的决策
+
+- 是否开放匿名公开注册，以及开放范围；当前拦截器只放行 login，本次不变更放行列表。
+- 注册成功是否自动登录。若不自动登录，注册只负责 MySQL 写入；若自动登录，再定义 Session 写入失败时账户已创建的响应与重试语义，不假定 MySQL 和 Redis 可共同回滚。
+- 成功 HTTP 状态、响应字段、用户名冲突业务码，以及是否提供前端注册入口。
+
+### 6.3 联调与文档交付
+
+正式 API 契约确定后同步 API.md、错误码及测试计划；若增加前端入口，再在 UniApp 阶段接入真实接口，不使用 Mock 模拟成功。演示 SQL 继续仅用于开发演示，注册上线后再决定是否保留。注册不包含找回密码、短信/邮箱验证或第三方登录，新增范围需另行确认。
+
+验收覆盖注册后真实持久化及登录、输入边界、规范化重名、并发唯一性、故障响应、敏感信息保护，以及按最终决策实现的登录策略。具体待执行场景见 TEST_PLAN.md 的注册规划章节。

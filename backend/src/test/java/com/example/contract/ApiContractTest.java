@@ -3,6 +3,11 @@ package com.example.contract;
 import com.example.checkin.common.ApiResponse;
 import com.example.checkin.common.ErrorCode;
 import com.example.checkin.config.ApiResponseAdvice;
+import com.example.checkin.config.WebMvcConfig;
+import com.example.checkin.auth.AuthInterceptor;
+import com.example.checkin.service.AuthService;
+import com.example.checkin.service.SessionService;
+import org.springframework.context.annotation.Bean;
 import com.example.checkin.dto.PageRequest;
 import com.example.checkin.exception.ApiErrorController;
 import com.example.checkin.exception.BusinessException;
@@ -34,6 +39,9 @@ import org.springframework.validation.BindException;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.example.checkin.dto.CurrentUserResponse;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -51,17 +59,57 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @SpringBootTest(classes = ApiContractTest.WebApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ActiveProfiles("test")
 class ApiContractTest {
     /** 随机端口避免占用开发服务端口。 */
     @LocalServerPort int port;
+    /** 仅提供认证所需的业务结果，MVC 路由与拦截器仍使用生产实现。 */
+    @Autowired SessionService sessionService;
+    @Autowired AuthService authService;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final JsonMapper json = JsonMapper.builder().build();
+
+    /** 认证通过后，未知受保护路径应继续进入路由缺失处理，返回 40400 而非 40101。 */
+    @Test
+    void authenticatedUnknownApiRouteIs404() throws Exception {
+        org.mockito.Mockito.when(sessionService.getUserId("valid-route-test-token")).thenReturn(7L);
+        org.mockito.Mockito.when(authService.getCurrentUser(7L))
+                .thenReturn(new CurrentUserResponse("7", "demo"));
+        try {
+            check(client.send(HttpRequest.newBuilder(uri("/api/v1/nonexistent-contract-route"))
+                            .timeout(Duration.ofSeconds(10))
+                            .header("Authorization", "Bearer valid-route-test-token").GET().build(),
+                    HttpResponse.BodyHandlers.ofString()), 404, 40400);
+            org.mockito.Mockito.verify(authService).getCurrentUser(7L);
+        } finally {
+            // Spring 上下文复用同一组 Bean，清除桩与调用记录，避免影响其他测例。
+            org.mockito.Mockito.reset(sessionService, authService);
+        }
+    }
 
     /** 独立装配 Web 层，复用 application.yml，但关闭本测试不需要的数据源自动配置。 */
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration(excludeName = "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration")
-    @Import({GlobalExceptionHandler.class, ApiResponseAdvice.class, ApiErrorController.class, ProbeController.class})
-    static class WebApplication { }
+    @Import({GlobalExceptionHandler.class, ApiResponseAdvice.class, ApiErrorController.class, ProbeController.class,
+            WebMvcConfig.class, AuthInterceptor.class})
+    static class WebApplication {
+        /** 仅替换存储相关服务；拦截器及其路径注册均使用生产配置。 */
+        @Bean
+        SessionService sessionService() { return org.mockito.Mockito.mock(SessionService.class); }
+
+        /** 无令牌请求应在调用认证业务前拒绝，不需要真实数据库。 */
+        @Bean
+        AuthService authService() { return org.mockito.Mockito.mock(AuthService.class); }
+    }
+
+    /**
+     * 锁定生产默认 MVC 资源映射下的边界：受保护前缀的未知路径先经过认证。
+     * 通过真实 HTTP 容器和生产 WebMvcConfig 验证，不在测试中手工注册路径规则。
+     */
+    @Test
+    void unauthenticatedUnknownApiRouteIs401() throws Exception {
+        check(send("GET", "/api/v1/nonexistent-contract-route", null), 401, 40101);
+    }
 
     /** 成功响应保持结构和 201 状态；空数据仍明确输出 data:null。 */
     @Test

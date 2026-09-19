@@ -62,9 +62,13 @@ interview_checkin-app/
 
 Redis 会话写入失败时不得返回登录成功。
 
-当前实现由 AuthController → AuthServiceImpl → UserMapper / SessionServiceImpl 完成。用户名 trim 后按 Locale.ROOT 转小写，密码不 trim。会话值为用户 ID 字符串，固定 TTL，不滑动续期。登录响应包含 token、tokenType、expiresIn 和 user，用户 ID 为字符串。登录与账户初始化共用用户名范围及密码 UTF-8 字节数校验。
+当前实现由 AuthController → AuthServiceImpl → UserMapper / SessionServiceImpl 完成。用户名 trim 后按 Locale.ROOT 转小写，密码不 trim。会话值为用户 ID 字符串，固定 TTL，不滑动续期。登录响应包含 token、tokenType、expiresIn 和 user，用户 ID 为字符串。登录校验用户名范围及密码 UTF-8 字节数；演示账户通过独立 SQL 手工准备。
 
 受保护请求由 AuthInterceptor 查询 Redis，将身份写入本次 HttpServletRequest 属性；`GET /auth/me` 再查询 MySQL 返回安全用户字段。`POST /auth/logout` 删除当前令牌对应的会话，其他令牌不受影响；重复登出被拦截并返回 401。拦截器还通过认证服务确认 MySQL 用户存在，否则撤销当前会话。Redis 会话数据访问故障统一为 50301。H5 跨域配置留待前端联调阶段实现。
+
+### 4.1.1 用户注册（后续独立扩展）
+
+后续注册作为独立认证扩展：请求 DTO → Service 校验与 BCrypt → Mapper 写入 users，由用户名唯一约束保证并发安全。不使用启动回调创建用户。是否公开放行、是否注册后创建 Redis Session 在实施前确定；自动登录若被采用，必须明确 MySQL 已提交而 Session 写入失败时的行为。具体规划见 IMPLEMENTATION_PLAN.md 第 6 节。
 
 ### 4.2 每日打卡（后续阶段）
 
@@ -115,7 +119,7 @@ Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登�
 | `VITE_API_BASE_URL` | 规划项：前端 API 基础地址 |
 | `SPRING_PROFILES_ACTIVE` | 当前默认 local；可在运行环境覆盖 |
 
-演示账户当前直接读取配置属性 `app.demo-user.username`、`app.demo-user.password`，未映射原规划的 `DEMO_USERNAME`、`DEMO_PASSWORD`。可在被 Git 忽略的本地配置中提供；两者非空白时启动即尝试初始化，不存在则写入 BCrypt 密码哈希与 UTC 时间，已存在则跳过。没有独立初始化开关或环境限制，测试环境应留空凭证。业务时区、业务缓存、CORS 和前端配置仍为规划项，不代表已经接入运行逻辑。
+演示账户来自可选的 `database/demo-data.sql`，不由应用启动创建。真实本地配置位于 `backend/config/application-local.yml`，示例可提交，真实文件不提交、不打包；从 backend 工作目录读取外部配置。业务时区、业务缓存、CORS 和前端配置仍为规划项。
 
 配置由运行环境注入，命令行和 IDEA 配置方式见 [README](README.md)。仓库只提供不含真实凭证的配置示例。
 
