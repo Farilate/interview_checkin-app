@@ -7,9 +7,12 @@ import com.example.checkin.exception.BusinessException;
 import com.example.checkin.mapper.HabitMapper;
 import com.example.checkin.model.Habit;
 import com.example.checkin.service.HabitService;
+import com.example.checkin.dto.PageRequest;
+import com.example.checkin.dto.PageResponse;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
@@ -64,6 +67,40 @@ public class HabitServiceImpl implements HabitService {
                 habit.getDescription(),
                 habit.getCreatedAt(),
                 habit.getUpdatedAt()
+        );
+    }
+
+    /**
+     * 分页查询当前用户的打卡项。
+     */
+    @Override
+    public PageResponse<HabitResponse> getHabits(
+            long userId,
+            PageRequest pageRequest) {
+
+        List<Habit> habits = habitMapper.findByUserId(
+                userId,
+                pageRequest.offset(),
+                pageRequest.getPageSize()
+        );
+
+        long total = habitMapper.countByUserId(userId);
+
+        List<HabitResponse> items = habits.stream()
+                .map(habit -> new HabitResponse(
+                        habit.getId(),
+                        habit.getName(),
+                        habit.getDescription(),
+                        habit.getCreatedAt(),
+                        habit.getUpdatedAt()
+                ))
+                .toList();
+
+        return new PageResponse<>(
+                items,
+                total,
+                pageRequest.getPage(),
+                pageRequest.getPageSize()
         );
     }
 }
