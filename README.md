@@ -131,7 +131,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 .\mvnw.cmd -B -ntp -Pmysql-it clean verify
 ```
 
-普通 `clean verify` 执行 58 项公共 HTTP 契约检查、30 项认证回归、1 项演示哈希验证和 32 项 Habit HTTP 回归（共 121 项）并打包，不执行 `PersistenceIT`；报告位于 `backend/target/surefire-reports/`。启用 `mysql-it` 后额外运行 10 项真实 MySQL 持久层测试，报告位于 `backend/target/failsafe-reports/`。
+普通 `clean verify` 执行 58 项公共 HTTP 契约检查、30 项认证回归、1 项演示哈希验证和 43 项 Habit HTTP 回归（共 132 项）并打包，不执行 `PersistenceIT`；报告位于 `backend/target/surefire-reports/`。启用 `mysql-it` 后额外运行 10 项真实 MySQL 持久层测试，报告位于 `backend/target/failsafe-reports/`。
 
 持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，不代表业务接口或 HTTP 并发验收已完成。应用启动不再执行账户写入，测试仍必须指向专用测试库。
 
@@ -142,7 +142,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
   编译需要启用注解处理。配置依据：[Lombok Maven 说明](https://projectlombok.org/setup/maven)。
 - 不同用户允许同名习惯，同一用户内名称唯一；数据库约束为 `uk_habits_user_name(user_id, name)`，按 `utf8mb4_0900_ai_ci` 排序规则判重。
 - 已有表不会随建表脚本变更自动升级，应确认数据库已包含约定的唯一索引。
-- Habit 创建已执行名称 trim、用户内查重及插入唯一键冲突转 HTTP 409 / `40901`；分页查询只使用当前用户身份。创建当前返回 200，响应 ID/时间与原设计的差异见 API.md。
+- Habit 创建返回 201，名称 trim 后按 Unicode 码点校验并查重；仅指定名称唯一约束冲突转 HTTP 409 / `40901`。空白描述转 NULL；创建与分页响应均输出字符串 ID 和带 Z 的 UTC 时间。分页只查询当前用户，成功返回 200。
 
 ## 异常处理约定
 
@@ -150,7 +150,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 
 ## 验证结果与限制
 
-2026-09-19，Java 21.0.12.1 / Maven 3.9.11 下 Habit 补测后的 `verify` 构建成功：121 项测试全部通过，0 失败、0 错误、0 跳过。其中公共 HTTP 契约 58 项、认证回归 30 项、演示哈希验证 1 项、Habit HTTP 回归 32 项；认证和 Habit 回归使用外部存储替身。
+2026-09-19，Java 21.0.12.1 / Maven 3.9.11 下 Habit 契约修复后的 `verify` 构建成功：132 项测试全部通过，0 失败、0 错误、0 跳过。其中公共 HTTP 契约 58 项、认证回归 30 项、演示哈希验证 1 项、Habit HTTP 回归 43 项；认证和 Habit 回归使用外部存储替身。
 
 真实 MySQL 的 10 项持久层测试在此前回归中通过，认证修复后未重跑。真实 MySQL/Redis 登录联调、实际会话到期、断网故障、演示 SQL 实际导入和 H5 尚未验收，阶段 4 因此尚未完成全部验收。CORS 留待 H5 联调阶段处理。
 

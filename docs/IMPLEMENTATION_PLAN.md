@@ -37,7 +37,7 @@
 - Session 默认 TTL：7200 秒。
 - 业务缓存采用短 TTL Cache-Aside；MySQL 为最终事实来源。
 
-阶段 5 当前契约差异：创建返回 200 而非原设计 201；Habit ID 为 JSON 数字；UTC LocalDateTime 不带 Z；长度按原始字符串 UTF-16 单元校验，空描述不归一化。具体行为与待统一项见 API.md 第 3–4 节及 TEST_PLAN.md 第 12 节，本次只完善文档和测试。
+阶段 5 已修复接口契约：创建返回 201；Habit ID 为字符串；响应 UTC 时间带 Z；名称 trim 后按 Unicode 码点校验，空白描述转 NULL；仅明确的习惯名称唯一约束冲突返回 40901。HTTP 回归和构建通过，真实存储及并发验收仍待执行，见 TEST_PLAN.md 第 12 节。
 
 ## 3. 阶段依赖与增量契约
 

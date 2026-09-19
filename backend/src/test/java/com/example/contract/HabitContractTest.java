@@ -34,8 +34,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 
@@ -88,10 +91,11 @@ class HabitContractTest {
     /** 创建由会话确定所属用户；保存 trim 后名称及 UTC 时间，不向外暴露 userId。 */
     @Test
     void createUsesAuthenticatedOwnerAndUtcTime() throws Exception {
-        LocalDateTime before = LocalDateTime.now(ZoneOffset.UTC);
+        // 下界也按毫秒比较，避免同一毫秒内的精度截断导致错误地判定时间倒退。
+        LocalDateTime before = LocalDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.MILLIS);
         JsonNode data = check(send("POST", "?userId=999", "owner",
-                "{\"name\":\"  每日阅读  \",\"description\":\"阅读二十分钟\"}"), 200, 0).get("data");
-        assertEquals(101, data.get("id").asLong());
+                "{\"name\":\"  每日阅读  \",\"description\":\"阅读二十分钟\"}"), 201, 0).get("data");
+        assertEquals("101", data.get("id").asString());
         assertEquals("每日阅读", data.get("name").asString());
         assertEquals("阅读二十分钟", data.get("description").asString());
         assertFalse(data.has("userId"));
@@ -103,28 +107,31 @@ class HabitContractTest {
         assertFalse(habit.getCreatedAt().isBefore(before));
         assertFalse(habit.getCreatedAt().isAfter(LocalDateTime.now(ZoneOffset.UTC)));
         assertEquals(habit.getCreatedAt(), habit.getUpdatedAt());
-        assertEquals(habit.getCreatedAt(), LocalDateTime.parse(data.get("createdAt").asString()));
+        // 捕获实际传入 Mapper 的时间，确保写入和响应均不含亚毫秒数据。
+        assertEquals(0, habit.getCreatedAt().getNano() % 1_000_000);
+        assertTrue(data.get("createdAt").asString().endsWith("Z"));
+        assertEquals(habit.getCreatedAt().toInstant(ZoneOffset.UTC), Instant.parse(data.get("createdAt").asString()));
         assertEquals(data.get("createdAt"), data.get("updatedAt"));
         verify(habits).findByUserIdAndName(7L, "每日阅读");
     }
 
-    /** 名称、描述上限允许保存；名称允许 emoji，当前长度按 UTF-16 单元计算。 */
+    /** 名称 trim 后按 Unicode 码点计长；50 个 emoji 和 200 个描述 emoji 均可保存。 */
     @Test
     void acceptsLengthBoundaries() throws Exception {
         check(send("POST", "", "owner", json.writeValueAsString(
-                Map.of("name", "📚".repeat(25), "description", "文".repeat(200)))), 200, 0);
+                Map.of("name", "  " + "📚".repeat(50) + "  ", "description", "📚".repeat(200)))), 201, 0);
         verify(habits).insert(any());
     }
 
-    /** 缺省或显式 null 保留 null，空字符串描述当前原样保存，不做归一化。 */
+    /** 缺省、显式 null、空字符串及纯空白描述均保存并返回 null。 */
     @ParameterizedTest
     @ValueSource(strings = {"{\"name\":\"阅读\"}", "{\"name\":\"阅读\",\"description\":null}",
-            "{\"name\":\"阅读\",\"description\":\"\"}"})
+            "{\"name\":\"阅读\",\"description\":\"\"}", "{\"name\":\"阅读\",\"description\":\"   \"}"})
     void optionalDescription(String body) throws Exception {
-        JsonNode data = check(send("POST", "", "owner", body), 200, 0).get("data");
+        JsonNode data = check(send("POST", "", "owner", body), 201, 0).get("data");
         assertTrue(data.has("description"));
-        if (body.contains("\"\"")) assertEquals("", data.get("description").asString());
-        else assertTrue(data.get("description").isNull());
+        assertTrue(data.get("description").isNull());
+        verify(habits).insert(argThat(h -> h.getDescription() == null));
     }
 
     /** 非法 JSON、空白名称及服务端专属字段在业务写入前拒绝。 */
@@ -137,11 +144,12 @@ class HabitContractTest {
         verifyNoInteractions(habits);
     }
 
-    /** 锁定实际校验顺序：先检查原始字符串长度，再由业务层 trim。 */
+    /** 名称 trim 后超过 50 码点、描述超过 200 码点时，在任何 Mapper 调用前拒绝。 */
     @Test
-    void rejectsOverlongFieldsBeforeTrim() throws Exception {
+    void rejectsOverlongCodePointFields() throws Exception {
         for (Map<String, String> body : List.of(Map.of("name", "文".repeat(51)),
-                Map.of("name", " " + "文".repeat(50)), Map.of("name", "📚".repeat(26)),
+                Map.of("name", " " + "文".repeat(51)), Map.of("name", "📚".repeat(51)),
+                Map.of("name", "阅读", "description", "📚".repeat(201)),
                 Map.of("name", "阅读", "description", "文".repeat(201)))) {
             check(send("POST", "", "owner", json.writeValueAsString(body)), 400, 40001);
         }
@@ -157,18 +165,59 @@ class HabitContractTest {
     }
 
     /** 模拟预检查后发生唯一键竞争；验证异常分支，不冒充真实并发数据库测试。 */
-    @Test
-    void duplicateInsertIsConflict() throws Exception {
-        doThrow(new DuplicateKeyException("uk_habits_user_name")).when(habits).insert(any());
+    @ParameterizedTest
+    @ValueSource(strings = {"uk_habits_user_name", "habits.uk_habits_user_name", "checkin.habits.uk_habits_user_name"})
+    void duplicateInsertIsConflict(String key) throws Exception {
+        doThrow(new DuplicateKeyException("包装消息", new SQLException(
+                "Duplicate entry '7-阅读' for key '" + key + "'", "23000", 1062)))
+                .when(habits).insert(any());
         check(send("POST", "", "owner", "{\"name\":\"阅读\"}"), 409, 40901);
         verify(habits).insert(any());
+    }
+
+    /** 不能因主键、相似索引名或重复值中含有目标索引名称而误报业务重名。 */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Duplicate entry '7' for key 'PRIMARY'",
+            "Duplicate entry '7' for key 'habits.uk_habits_user_id_id'",
+            "Duplicate entry '7' for key 'uk_habits_user_name_backup'",
+            "Duplicate entry 'uk_habits_user_name' for key 'PRIMARY'",
+            "Duplicate entry 'for key 'uk_habits_user_name'' for key 'PRIMARY'",
+            "unknown format uk_habits_user_name"})
+    void unrelatedOrUnknownUniqueConflictIsInternalError(String message) throws Exception {
+        doThrow(new DuplicateKeyException("包装消息", new SQLException(message, "23000", 1062)))
+                .when(habits).insert(any());
+        check(send("POST", "", "owner", "{\"name\":\"阅读\"}"), 500, 50001);
+    }
+
+    /** 只有名字相符还不够：缺少 JDBC 原因、错误号或 SQLState 不符均保守回退。 */
+    @Test
+    void requiresMysqlDuplicateErrorIdentity() throws Exception {
+        String message = "Duplicate entry '7' for key 'uk_habits_user_name'";
+        for (DuplicateKeyException failure : List.of(
+                new DuplicateKeyException(message),
+                new DuplicateKeyException("包装消息", new SQLException(message, "23000", 1452)),
+                new DuplicateKeyException("包装消息", new SQLException(message, "HY000", 1062)),
+                new DuplicateKeyException("包装消息", new SQLException(null, "23000", 1062)))) {
+            doThrow(failure).when(habits).insert(any());
+            check(send("POST", "", "owner", "{\"name\":\"阅读\"}"), 500, 50001);
+        }
+    }
+
+    /** 有内容的描述不擅自 trim，保留用户输入中的排版空格。 */
+    @Test
+    void preservesNonBlankDescription() throws Exception {
+        JsonNode data = check(send("POST", "", "owner",
+                "{\"name\":\"阅读\",\"description\":\"  保留空格  \"}"), 201, 0).get("data");
+        assertEquals("  保留空格  ", data.get("description").asString());
+        verify(habits).insert(argThat(h -> "  保留空格  ".equals(h.getDescription())));
     }
 
     /** 相同名称分别按两名用户查询和插入，不能错误地实施全局名称唯一。 */
     @Test
     void differentUsersMayCreateSameName() throws Exception {
         for (String token : List.of("owner", "other")) {
-            check(send("POST", "", token, "{\"name\":\"阅读\"}"), 200, 0);
+            check(send("POST", "", token, "{\"name\":\"阅读\"}"), 201, 0);
         }
         verify(habits).findByUserIdAndName(7L, "阅读");
         verify(habits).findByUserIdAndName(8L, "阅读");
@@ -192,7 +241,7 @@ class HabitContractTest {
     @Test
     void mapsPageItemsAndTotal() throws Exception {
         Habit habit = new Habit();
-        habit.setId(102L);
+        habit.setId(9007199254740993L);
         habit.setUserId(8L);
         habit.setName("运动");
         habit.setCreatedAt(LocalDateTime.of(2026, 9, 19, 1, 0));
@@ -205,7 +254,8 @@ class HabitContractTest {
         assertEquals(2, data.get("pageSize").asInt());
         assertEquals(1, data.get("items").size());
         assertEquals("运动", data.get("items").get(0).get("name").asString());
-        assertEquals(102, data.get("items").get(0).get("id").asLong());
+        assertEquals("9007199254740993", data.get("items").get(0).get("id").asString());
+        assertEquals("2026-09-19T01:00:00Z", data.get("items").get(0).get("createdAt").asString());
         assertTrue(data.get("items").get(0).has("updatedAt"));
         assertFalse(data.get("items").get(0).has("userId"));
         verify(habits).countByUserId(8L);

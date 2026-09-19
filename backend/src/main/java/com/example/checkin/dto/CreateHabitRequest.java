@@ -1,7 +1,6 @@
 package com.example.checkin.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -15,12 +14,10 @@ import lombok.Setter;
 @Setter
 public class CreateHabitRequest {
 
-    /** 打卡项名称。 */
+    /** 打卡项名称；非空白校验在入口执行，trim 后的码点长度由 Service 校验。 */
     @NotBlank
-    @Size(max = 50)
     private String name;
 
-    /** 可选描述。 */
-    @Size(max = 200)
+    /** 可选描述；Service 按 Unicode 码点限制 200，并将空白描述归一为 null。 */
     private String description;
 }

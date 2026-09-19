@@ -10,9 +10,7 @@ import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 import com.example.checkin.dto.PageRequest;
 import com.example.checkin.dto.PageResponse;
-import jakarta.validation.Valid;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.http.HttpStatus;
 
 /**
  * 打卡项接口。
@@ -31,9 +29,10 @@ public class HabitController {
     }
 
     /**
-     * 创建新的打卡项。
+     * 创建新的打卡项，写入成功返回 201 Created；错误仍由统一异常处理决定状态。
      */
     @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<HabitResponse> createHabit(
             @Valid @RequestBody CreateHabitRequest requestBody,
             HttpServletRequest request) {
@@ -47,6 +46,7 @@ public class HabitController {
         );
     }
 
+    /** 分页查询当前会话所属用户的数据，成功仍返回 200 OK。 */
     @GetMapping
     public ApiResponse<PageResponse<HabitResponse>> getHabits(
             @Valid @ModelAttribute PageRequest pageRequest,

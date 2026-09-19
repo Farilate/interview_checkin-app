@@ -45,13 +45,13 @@ Authorization: Bearer <token>
 | 503 | 50302 | 数据库连接不可用或临时事务故障 |
 | 500 | 50001 | 非预期服务器错误，隐藏内部细节 |
 
-目标约定：ID 使用十进制正整数字符串，时间戳为带 Z 的 ISO 8601 UTC；业务日期为 `YYYY-MM-DD`。认证 ID 已遵循约定；当前 Habit DTO 输出数字 ID 和不带 Z 的 UTC LocalDateTime，属于待统一差异。H5 接入前需处理大整数精度和时区解释问题，第 3–4 节示例反映当前实际输出。
+ID 使用十进制正整数字符串，认证与 Habit 响应均遵循该约定，避免 H5 大整数精度丢失。时间戳为带 Z 的 ISO 8601 UTC；业务日期为 `YYYY-MM-DD`。Habit 持久层保留 UTC LocalDateTime，在响应映射时显式转为 Instant，不依赖服务器默认时区。
 
 登录响应及受保护接口响应设置 `Cache-Control: no-store`；后端 Redis 业务缓存不改变 HTTP 缓存语义。
 
 ### 已实现的公共处理
 
-- `ApiResponse<T>` 是统一响应 DTO；成功响应显式调用 `ok`，当前 Habit 创建返回 HTTP 200（原设计为 201）。错误响应始终包含 `data:null`。
+- `ApiResponse<T>` 是统一响应 DTO；成功响应显式调用 `ok`，Habit 创建返回 HTTP 201，列表查询返回 HTTP 200。错误响应始终包含 `data:null`。
 - `ErrorCode` 集中管理 HTTP 状态、业务码和安全提示，`BusinessException` 只携带预定义错误码。
 - 映射方向为“明确业务原因或异常类型 → ErrorCode → HTTP 状态”，不提供从 HTTP 状态反推业务错误的方法。业务异常直接使用自身错误码；Redis 会话故障在会话边界转换为 50301，数据库可用性异常保持 50302。
 - `GlobalExceptionHandler` 处理 MVC 参数绑定、`@Valid` 请求体校验、方法参数校验、JSON 解析、404、405、406、415、业务和数据库异常；405 保留 `Allow` 响应头。
@@ -155,27 +155,27 @@ Request：
 }
 ```
 
-不允许在 JSON 中传 userId、id 等未知字段。名称先对原始字符串执行非空白及最多 50 个 UTF-16 单元校验，再 trim 后查重和保存；描述可省略或为 null，最多 200 个 UTF-16 单元，空字符串及空格原样保存。额外查询参数 userId 不参与身份判断。
+不允许在 JSON 中传 userId、id 等未知字段。名称非空白，先 trim，再按 Unicode 码点校验 1–50；描述可省略或为 null，按 Unicode 码点校验最多 200，空字符串或纯空白归一为 null，有内容的描述保留原文。码点不是 UTF-16 单元，也不是组合字符的显示宽度；例如单个 📚 计为一个码点。额外查询参数 userId 不参与身份判断。
 
-Response：HTTP 200（当前实现，原设计的 201 尚未落实）。
+Response：HTTP 201。
 
 ```json
 {
   "code": 0,
   "message": "ok",
   "data": {
-    "id": 101,
+    "id": "101",
     "name": "每日阅读",
     "description": "阅读二十分钟",
-    "createdAt": "2026-09-17T01:00:00",
-    "updatedAt": "2026-09-17T01:00:00"
+    "createdAt": "2026-09-17T01:00:00Z",
+    "updatedAt": "2026-09-17T01:00:00Z"
   }
 }
 ```
 
 主要错误：`40001` 名称空白、字段超长或非法字段；HTTP 409 / `40901` 当前用户已存在同名打卡项。
 
-不同用户允许同名习惯；同一用户内名称唯一。名称先 trim，数据库按 `uk_habits_user_name(user_id, name)` 及列排序规则判重。业务先查询，再由数据库约束兜底；插入触发 DuplicateKeyException 时返回 HTTP 409 / `40901`。当前捕获未按约束名细分，不能据此声称已经识别指定约束。真实并发唯一性仍需 MySQL 接口联调验证。
+不同用户允许同名习惯；同一用户内名称唯一。名称先 trim，数据库按 `uk_habits_user_name(user_id, name)` 及列排序规则判重。业务先查询，再由数据库约束兜底；插入异常仅在 JDBC 原因同时满足 MySQL 1062、SQLState 23000 且完整键名为 uk_habits_user_name（允许库/表前缀）时转换为 HTTP 409 / `40901`。主键、其他索引、无法识别的消息格式仍交给统一异常处理返回 50001，客户端不接收数据库原文。真实并发唯一性仍需 MySQL 接口联调验证。
 
 ## 4. 查询当前用户打卡项列表
 
@@ -200,11 +200,11 @@ Response：HTTP 200。
   "data": {
     "items": [
       {
-        "id": 101,
+        "id": "101",
         "name": "每日阅读",
         "description": "阅读二十分钟",
-        "createdAt": "2026-09-17T01:00:00",
-        "updatedAt": "2026-09-17T01:00:00"
+        "createdAt": "2026-09-17T01:00:00Z",
+        "updatedAt": "2026-09-17T01:00:00Z"
       }
     ],
     "page": 1,

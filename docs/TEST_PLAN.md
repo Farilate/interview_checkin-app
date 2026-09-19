@@ -23,7 +23,7 @@
 | M01 | 正常登录 | HTTP 200/code=0；Redis 建立 Session；TTL 接近配置值（默认 7200 秒）；Token 可访问受保护 API |
 | M02 | 错误密码 / 不存在用户名 | 均返回 401/40102；外部提示一致；不创建有效 Session |
 | M03 | Token 缺失、伪造或过期 | 401/40101；不能访问或修改业务数据 |
-| M04 | 创建打卡项并重新查询列表 | 当前 HTTP 200（原设计 201 待统一）；真实写入 MySQL；列表可查；刷新后仍存在 |
+| M04 | 创建打卡项并重新查询列表 | HTTP 201；真实写入 MySQL；列表可查；刷新后仍存在 |
 | M05 | 参数校验 | 空白/超长名称、非法分页等返回 400；无非法写入 |
 | M06 | 用户隔离 | 用户 A 无法查询或打卡用户 B 的习惯；他人资源与不存在资源均返回 404 |
 | M07 | 空列表与分页 | 无数据时 `items=[]`；分页参数合法；排序稳定 |
@@ -117,10 +117,10 @@
 | SessionServiceTest | 13 | 摘要键、固定 TTL 调用、不续期、无效身份值、非法 TTL 和 Redis 故障分类 | Java 21 下 verify 通过 |
 | AuthControllerTest | 8 | 生产认证组件的 MVC 登录、当前用户、登出、重复登出、多会话隔离及 50301 响应 | Java 21 下 verify 通过 |
 | DemoDataTest | 1 | 生产 BCrypt 编码器验证公开演示 SQL 哈希，SQL 不含明文密码 | Java 21 下 clean verify 验证 |
-| HabitContractTest | 32 | 随机端口真实 HTTP；生产 Habit Controller/Service、鉴权配置、创建校验、重名、用户隔离、分页和故障分类；Mapper/认证依赖使用替身 | 本轮 verify 通过 |
+| HabitContractTest | 43 | 随机端口真实 HTTP；生产 Habit Controller/Service、鉴权配置、创建校验、重名、用户隔离、分页和故障分类；Mapper/认证依赖使用替身 | 本轮 verify 通过 |
 | PersistenceIT | 10 | 真实 MySQL 中三个 Mapper、字段映射、分页、用户隔离、用户名/习惯名唯一、打卡唯一及复合外键 | 认证修复前的 mysql-it 回归通过；认证修复后未重跑 |
 
-最近一次公共异常、认证与 Habit 代码验证使用 Java 21.0.12.1 / Maven 3.9.11 / Spring Boot 4.1.1，执行 `verify`：普通回归共 121 项，0 失败、0 错误、0 跳过，可执行 JAR 打包成功。报告位于 `backend/target/surefire-reports/`。认证及 Habit 测试使用外部存储替身，不连接真实 MySQL/Redis；生产业务仍使用真实 Mapper 和 Redis 客户端。
+最近一次公共异常、认证与 Habit 代码验证使用 Java 21.0.12.1 / Maven 3.9.11 / Spring Boot 4.1.1，执行 `verify`：普通回归共 132 项，0 失败、0 错误、0 跳过，可执行 JAR 打包成功。报告位于 `backend/target/surefire-reports/`。认证及 Habit 测试使用外部存储替身，不连接真实 MySQL/Redis；生产业务仍使用真实 Mapper 和 Redis 客户端。
 
 MySQL Server 具体版本缺少 SELECT VERSION() 证据，已移除原具体数字；下次真实联调查询后记录。PersistenceIT 的最近记录使用隔离 MySQL 测试实例及专用空库，执行 `-Pmysql-it clean verify`。10 项持久层测试通过，结束后独立查询三表行数均为 0，测试事务已回滚。当前规则为不同用户允许同名、同一用户名称唯一；现有测例不包含多线程并发验证。报告目录为 `backend/target/failsafe-reports/`，构建产物可能被后续 clean 清理。
 
@@ -159,7 +159,7 @@ Habit 创建、去重和分页接口已实现并补测，真实存储接口验�
 
 ## 11. 可选加分项：用户注册验收（主线完成后最后做）
 
-注册不属于主线必做验收；Phase 1–11 主线功能、联调、必做测试及演示准备全部完成后，才按单独授权最后实施。未实现注册不影响主线交付。以下仅为选择实施加分项后的验收计划，不计入现有 121 项测试结果；实施前先确定开放范围、成功响应、用户名冲突业务码及是否自动登录。
+注册不属于主线必做验收；Phase 1–11 主线功能、联调、必做测试及演示准备全部完成后，才按单独授权最后实施。未实现注册不影响主线交付。以下仅为选择实施加分项后的验收计划，不计入现有 132 项测试结果；实施前先确定开放范围、成功响应、用户名冲突业务码及是否自动登录。
 
 | 场景 | 计划验收要求 |
 | --- | --- |
@@ -177,13 +177,13 @@ Habit 创建、去重和分页接口已实现并补测，真实存储接口验�
 注册实现时再新增测试代码，现阶段不调整既有测试数量或执行结果。
 ## 12. Habit 创建、去重与分页回归
 
-本轮新增 HabitContractTest 共 32 项，使用随机端口和生产 JSON/MVC 配置、HabitController、HabitServiceImpl、AuthInterceptor 及异常处理；仅替换 Mapper 与认证依赖。执行 Java 21 的 Maven verify，全部 121 项通过并打包成功，未执行 mysql-it。
+HabitContractTest 修复后共 43 项，使用随机端口和生产 JSON/MVC 配置、HabitController、HabitServiceImpl、AuthInterceptor 及异常处理；仅替换 Mapper 与认证依赖。执行 Java 21 的 Maven verify，全部 132 项通过并打包成功，未执行 mysql-it。
 
 覆盖：
 
 - 创建的身份来源、trim、UTC 时间、回填 ID、updatedAt 及隐藏 userId。
 - 名称/描述长度边界、emoji、缺省/null/空描述、非法 JSON、尾随内容与服务端字段拒绝。
-- 同用户名称预检查不写库、插入唯一键异常转 40901、跨用户同名独立查询和插入。
+- 同用户名称预检查不写库、指定名称唯一键异常转 40901、其他或无法识别的唯一键异常返回 50001、跨用户同名独立查询和插入。
 - 默认分页、空列表、第二页映射、总数、超末页、大页码 long 偏移、非法分页拒绝。
 - 两个接口无令牌/失效令牌拒绝，客户端 query userId 不替代当前身份。
 - 插入、列表、计数故障分类；统一 JSON、data:null、no-store 及错误信息脱敏。
@@ -192,6 +192,6 @@ Habit 创建、去重和分页接口已实现并补测，真实存储接口验�
 
 在专用测试库和 Redis 环境中，真实登录两个用户，创建后再次查询确认持久化及用户隔离；验证数据库排序规则下的大小写/重音等价名称，以及相同时间下 ID 倒序的分页；并发同用户同名创建应仅保存一条记录，其余返回 40901。现有 PersistenceIT 已覆盖 Mapper 分页、隔离与唯一约束，但本轮未重跑，模拟 DuplicateKeyException 不等于完成真实并发验收。
 
-### 已记录的实现与目标差异
+### 契约修复与回归边界
 
-创建当前返回 200，Habit ID 是数字，UTC 时间未带 Z；名称在 trim 前按 UTF-16 单元计长，空描述原样保存。测试锁定现状，不代表这些差异已经满足原设计。插入时所有 DuplicateKeyException 均转为 40901，尚未细分约束；列表与总数分别查询，不保证并发修改下的同一快照。本轮未改生产代码，后续调整契约或实现时需同步修改这些测试。
+已修复：创建返回 201；创建与列表使用字符串 ID 及带 Z 的 UTC 时间；名称 trim 后按 Unicode 码点计长，描述最多 200 码点且空白转 NULL。测试覆盖 50 个名称 emoji、200 个描述 emoji、边界超限、Long 大整数列表 ID、三种索引限定名，以及主键/其他索引/伪造名称/错误号或 SQLState 不符的拒绝误分类。数据库原始未知异常仍返回 50001。列表与总数分别查询，不保证并发修改下的同一快照，这不属于本次修复范围。
