@@ -7,6 +7,12 @@ import com.example.checkin.controller.HabitController;
 import com.example.checkin.dto.CurrentUserResponse;
 import com.example.checkin.exception.GlobalExceptionHandler;
 import com.example.checkin.mapper.HabitMapper;
+import com.example.checkin.mapper.CheckinRecordMapper;
+import com.example.checkin.model.CheckinRecord;
+import com.example.checkin.service.impl.CheckinRecordServiceImpl;
+import java.time.Clock;
+import java.time.ZoneId;
+import java.time.LocalDate;
 import com.example.checkin.model.Habit;
 import com.example.checkin.service.AuthService;
 import com.example.checkin.service.SessionService;
@@ -56,6 +62,8 @@ import static org.mockito.Mockito.*;
 class HabitContractTest {
     @LocalServerPort int port;
     @Autowired HabitMapper habits;
+    @Autowired CheckinRecordMapper records;
+    @Autowired Clock clock;
     @Autowired SessionService sessions;
     @Autowired AuthService auth;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -64,9 +72,12 @@ class HabitContractTest {
     /** 关闭数据源自动配置，显式装配当前 Habit 请求实际经过的生产组件。 */
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration(excludeName = "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration")
-    @Import({HabitController.class, HabitServiceImpl.class, WebMvcConfig.class,
+    @Import({HabitController.class, HabitServiceImpl.class, CheckinRecordServiceImpl.class, WebMvcConfig.class,
             AuthInterceptor.class, ApiResponseAdvice.class, GlobalExceptionHandler.class})
     static class Application {
+        /** 固定时钟仅替代系统时间，打卡业务使用生产 Service。 */
+        @Bean Clock clock() { return mock(Clock.class); }
+        @Bean CheckinRecordMapper records() { return mock(CheckinRecordMapper.class); }
         @Bean HabitMapper habits() { return mock(HabitMapper.class); }
         @Bean SessionService sessions() { return mock(SessionService.class); }
         @Bean AuthService auth() { return mock(AuthService.class); }
@@ -75,7 +86,9 @@ class HabitContractTest {
     /** 每例清除共享 Bean 的桩与调用记录；两个令牌分别对应两个服务端身份。 */
     @BeforeEach
     void setUp() {
-        reset(habits, sessions, auth);
+        reset(habits, records, clock, sessions, auth);
+        when(clock.getZone()).thenReturn(ZoneId.of("Asia/Shanghai"));
+        when(clock.instant()).thenReturn(Instant.parse("2026-09-19T16:00:00.123456789Z"));
         when(sessions.getUserId("expired")).thenReturn(null);
         when(sessions.getUserId("owner")).thenReturn(7L);
         when(sessions.getUserId("other")).thenReturn(8L);
@@ -308,6 +321,168 @@ class HabitContractTest {
         doReturn(List.of()).when(habits).findByUserId(7L, 0L, 20);
         when(habits.countByUserId(7L)).thenThrow(new DataAccessResourceFailureException("private-db-detail"));
         check(send("GET", "", "owner", null), 503, 50302);
+    }
+
+    /** 首次打卡使用会话身份、上海业务日期和 UTC 毫秒时间，忽略客户端伪造身份与日期。 */
+    @Test
+    void firstCheckinUsesServerIdentityAndBusinessDate() throws Exception {
+        allowCheckin();
+        JsonNode data = check(send("POST", "/101/checkins?userId=8&date=2000-01-01", "owner",
+                "{\"userId\":8,\"checkinDate\":\"2000-01-01\"}"), 200, 0).get("data");
+        assertEquals("9007199254740993", data.get("id").asString());
+        assertEquals("101", data.get("habitId").asString());
+        assertEquals("2026-09-20", data.get("checkinDate").asString());
+        assertEquals("2026-09-19T16:00:00.123Z", data.get("checkedInAt").asString());
+        assertEquals(4, data.size());
+        verify(records).insert(argThat(r -> r.getUserId() == 7L && r.getHabitId() == 101L
+                && r.getCheckinDate().equals(LocalDate.of(2026, 9, 20))
+                && r.getCheckedInAt().getNano() == 123_000_000));
+    }
+
+    /** 顺序重复请求返回同一记录与原始时间，只允许首次调用写入。 */
+    @Test
+    void repeatedCheckinReturnsStoredRecord() throws Exception {
+        allowCheckin();
+        CheckinRecord[] saved = new CheckinRecord[1];
+        when(records.findByUserHabitAndDate(7L, 101L, LocalDate.of(2026, 9, 20)))
+                .thenAnswer(call -> saved[0]);
+        doAnswer(call -> {
+            saved[0] = call.getArgument(0);
+            saved[0].setId(501L);
+            return 1;
+        }).when(records).insert(any());
+        JsonNode first = check(send("POST", "/101/checkins", "owner", null), 200, 0);
+        when(clock.instant()).thenReturn(Instant.parse("2026-09-19T17:00:00Z"));
+        JsonNode second = check(send("POST", "/101/checkins", "owner", null), 200, 0);
+        assertEquals(first, second);
+        verify(records, times(1)).insert(any());
+    }
+
+    /** 冲突后读取获胜记录；仅模拟数据库竞争分支，不代表已验证真实并发。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"uk_checkin_user_habit_date", "checkin_records.uk_checkin_user_habit_date"})
+    void checkinConflictReturnsWinner(String key) throws Exception {
+        allowCheckin();
+        CheckinRecord winner = storedCheckin();
+        when(records.findByUserHabitAndDate(7L, 101L, winner.getCheckinDate())).thenReturn(null, winner);
+        doThrow(checkinDuplicate(key)).when(records).insert(any());
+        JsonNode data = check(send("POST", "/101/checkins", "owner", null), 200, 0).get("data");
+        assertEquals("501", data.get("id").asString());
+        assertEquals("2026-09-19T16:00:00Z", data.get("checkedInAt").asString());
+        verify(records, times(2)).findByUserHabitAndDate(7L, 101L, winner.getCheckinDate());
+    }
+
+    /** 即使报告指定约束冲突，回查不到获胜记录也不能伪装成功。 */
+    @Test
+    void checkinConflictWithoutWinnerIsInternalError() throws Exception {
+        allowCheckin();
+        doThrow(checkinDuplicate("uk_checkin_user_habit_date")).when(records).insert(any());
+        check(send("POST", "/101/checkins", "owner", null), 500, 50001);
+    }
+
+    /** 普通其他唯一键冲突、缺失 JDBC 原因、错误号或 SQLState 不符不能返回重复成功。 */
+    @Test
+    void checkinUnrelatedFailuresRemainErrors() throws Exception {
+        allowCheckin();
+        for (DuplicateKeyException failure : List.of(checkinDuplicate("PRIMARY"),
+                new DuplicateKeyException("uk_checkin_user_habit_date"),
+                new DuplicateKeyException("包装", new SQLException("uk_checkin_user_habit_date", "23000", 1452)),
+                new DuplicateKeyException("包装", new SQLException("uk_checkin_user_habit_date", "HY000", 1062)))) {
+            doThrow(failure).when(records).insert(any());
+            check(send("POST", "/101/checkins", "owner", null), 500, 50001);
+        }
+    }
+
+    /** 不存在、他人习惯以及非正数 ID 当前统一查无资源，不能读取或写入打卡记录。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"101", "0", "-1"})
+    void checkinMissingHabitDoesNotTouchRecords(String id) throws Exception {
+        check(send("POST", "/" + id + "/checkins", "owner", null), 404, 40401);
+        verifyNoInteractions(records);
+    }
+
+    /** 另一会话不能借请求参数操作用户一的习惯。 */
+    @Test
+    void checkinRejectsAnotherOwner() throws Exception {
+        allowCheckin();
+        check(send("POST", "/101/checkins?userId=7", "other", null), 404, 40401);
+        verify(habits).findByUserIdAndId(8L, 101L);
+        verifyNoInteractions(records);
+    }
+
+    /** 认证与路径绑定失败必须发生在业务访问前。 */
+    @Test
+    void checkinAuthenticationAndMalformedId() throws Exception {
+        check(send("POST", "/101/checkins", null, null), 401, 40101);
+        check(send("POST", "/101/checkins", "expired", null), 401, 40101);
+        for (String id : List.of("abc", "9223372036854775808")) {
+            check(send("POST", "/" + id + "/checkins", "owner", null), 400, 40001);
+        }
+        verifyNoInteractions(habits, records);
+    }
+
+    /** 所有数据库阶段失败都不能返回虚假的打卡成功。 */
+    @Test
+    void checkinStorageFailures() throws Exception {
+        allowCheckin();
+        doThrow(new DataAccessResourceFailureException("private-db-detail")).when(records).insert(any());
+        check(send("POST", "/101/checkins", "owner", null), 503, 50302);
+        doThrow(new DataIntegrityViolationException("private-db-detail")).when(records).insert(any());
+        check(send("POST", "/101/checkins", "owner", null), 500, 50001);
+        when(records.findByUserHabitAndDate(anyLong(), anyLong(), any()))
+                .thenThrow(new DataAccessResourceFailureException("private-db-detail"));
+        check(send("POST", "/101/checkins", "owner", null), 503, 50302);
+        when(habits.findByUserIdAndId(7L, 101L))
+                .thenThrow(new DataAccessResourceFailureException("private-db-detail"));
+        check(send("POST", "/101/checkins", "owner", null), 503, 50302);
+    }
+
+    /** 固定在午夜两侧分别发起请求，验证跨日、跨月、跨年和闰日的业务日期。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"2026-09-19T15:59:59.999Z", "2026-09-19T16:00:00Z",
+            "2026-09-30T16:00:00Z", "2026-12-31T16:00:00Z", "2028-02-28T16:00:00Z"})
+    void checkinCalendarBoundaries(String instant) throws Exception {
+        allowCheckin();
+        Instant time = Instant.parse(instant);
+        when(clock.instant()).thenReturn(time);
+        JsonNode data = check(send("POST", "/101/checkins", "owner", null), 200, 0).get("data");
+        assertEquals(time.atZone(ZoneId.of("Asia/Shanghai")).toLocalDate().toString(),
+                data.get("checkinDate").asString());
+        assertEquals(time, Instant.parse(data.get("checkedInAt").asString()));
+    }
+
+    /** 当前只开放 POST 集合路径，不把原规划 PUT 或今日状态 GET 误记为已实现。 */
+    @Test
+    void checkinMethodContract() throws Exception {
+        check(send("PUT", "/101/checkins", "owner", null), 405, 40500);
+        check(send("GET", "/101/checkins", "owner", null), 405, 40500);
+    }
+
+    /** 构造当前用户拥有的习惯，并模拟数据库主键回填。 */
+    private void allowCheckin() {
+        when(habits.findByUserIdAndId(7L, 101L)).thenReturn(new Habit());
+        when(records.insert(any())).thenAnswer(call -> {
+            CheckinRecord record = call.getArgument(0);
+            record.setId(9007199254740993L);
+            return 1;
+        });
+    }
+
+    /** 模拟另一个请求已经写入数据库的获胜记录。 */
+    private CheckinRecord storedCheckin() {
+        CheckinRecord record = new CheckinRecord();
+        record.setId(501L);
+        record.setUserId(7L);
+        record.setHabitId(101L);
+        record.setCheckinDate(LocalDate.of(2026, 9, 20));
+        record.setCheckedInAt(LocalDateTime.of(2026, 9, 19, 16, 0));
+        return record;
+    }
+
+    /** 使用 JDBC 错误号与状态模拟 MySQL 唯一键冲突，不连接真实数据库。 */
+    private DuplicateKeyException checkinDuplicate(String key) {
+        return new DuplicateKeyException("包装消息", new SQLException(
+                "Duplicate entry '7-101-2026-09-20' for key '" + key + "'", "23000", 1062));
     }
 
     /** 通过随机端口发送请求，让真实 MVC 完成绑定、校验、序列化和错误处理。 */
