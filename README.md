@@ -121,7 +121,7 @@ userId。账户初始化和登录已执行用户名 trim 及小写规范化；�
 .\mvnw.cmd -B -ntp -Pmysql-it clean verify
 ```
 
-普通 `clean verify` 执行 56 项公共 HTTP 契约检查和 25 项认证回归并打包，不执行 `PersistenceIT`；报告位于 `backend/target/surefire-reports/`。启用 `mysql-it` 后额外运行 10 项真实 MySQL 持久层测试，报告位于 `backend/target/failsafe-reports/`。
+普通 `clean verify` 执行 56 项公共 HTTP 契约检查和 41 项认证与账户初始化回归并打包，不执行 `PersistenceIT`；报告位于 `backend/target/surefire-reports/`。启用 `mysql-it` 后额外运行 10 项真实 MySQL 持久层测试，报告位于 `backend/target/failsafe-reports/`。
 
 持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，不代表业务接口或 HTTP 并发验收已完成。测试前应留空演示账户初始化凭证。
 
@@ -141,7 +141,7 @@ userId。账户初始化和登录已执行用户名 trim 及小写规范化；�
 
 ## 验证结果与限制
 
-2026-09-18，Java 21.0.12.1 / Maven 3.9.11 下异常映射重构后的 `verify` 构建成功：81 项测试全部通过，0 失败、0 错误、0 跳过。其中公共 HTTP 契约测试 56 项、认证回归 25 项；认证回归使用外部存储替身。
+2026-09-19，Java 21.0.12.1 / Maven 3.9.11 下补充测试后的 `verify` 构建成功：97 项测试全部通过，0 失败、0 错误、0 跳过。其中公共 HTTP 契约测试 56 项、认证与账户初始化回归 41 项；认证回归使用外部存储替身。
 
 真实 MySQL 的 10 项持久层测试在此前回归中通过，认证修复后未重跑。真实 MySQL/Redis 登录联调、实际会话到期、断网故障、演示账户并发初始化和 H5 尚未验收，阶段 4 因此尚未完成全部验收。CORS 留待 H5 联调阶段处理。
 

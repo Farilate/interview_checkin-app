@@ -120,6 +120,52 @@ class AuthControllerTest {
         verify(redis).delete(anyString());
     }
 
+    /** 用户已删除但会话清理失败时返回 50301，不误报成功或掩盖存储故障。 */
+    @Test
+    void deletedUserCleanupFailure() throws Exception {
+        String token = login();
+        when(users.findById(7L)).thenReturn(null);
+        when(redis.delete(anyString())).thenThrow(new RedisConnectionFailureException("测试清理失败"));
+        mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value(50301));
+    }
+
+    /** 鉴权阶段 MySQL 暂时不可用不能删除正常会话，恢复后原令牌仍可访问。 */
+    @Test
+    void databaseFailurePreservesSession() throws Exception {
+        String token = login();
+        User restored = new User();
+        restored.setId(7L);
+        restored.setUsername("demo");
+        when(users.findById(7L)).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("测试数据库故障"))
+                .thenReturn(restored);
+        mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value(50302));
+        verify(redis, never()).delete(anyString());
+        mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+    }
+
+    /** 无效或模拟已过期令牌必须在查询用户表前拒绝。真实自然到期另行集成验收。 */
+    @Test
+    void unknownTokenDoesNotQueryUser() throws Exception {
+        mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer unknown-token"))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(40101));
+        verifyNoInteractions(users);
+    }
+
+    /** 合法格式的错误密码与不存在账户返回相同错误，不创建任何会话。 */
+    @Test
+    void wrongCredentialsDoNotCreateSession() throws Exception {
+        for (String username : new String[]{"demo", "absent"}) {
+            mvc.perform(post("/api/v1/auth/login").contentType("application/json")
+                            .content("{\"username\":\"" + username + "\",\"password\":\"wrong-password\"}"))
+                    .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(40102))
+                    .andExpect(header().string("Cache-Control", "no-store"));
+        }
+        verifyNoInteractions(values);
+    }
+
     /** 返回测试令牌并核对完整登录响应，不将令牌打印到控制台。 */
     private String login() throws Exception {
         var result = mvc.perform(post("/api/v1/auth/login").contentType("application/json")

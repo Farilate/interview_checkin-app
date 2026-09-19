@@ -87,6 +87,15 @@ class SessionServiceTest {
         assertEquals(ErrorCode.REDIS_SESSION_UNAVAILABLE, exception.getErrorCode());
     }
 
+    /** 损坏身份的删除若失败，必须按会话不可用报错，不能假装已成功撤销。 */
+    @Test
+    void corruptValueCleanupFailure() {
+        when(values.get(anyString())).thenReturn("broken");
+        when(redis.delete(anyString())).thenThrow(new RedisConnectionFailureException("测试删除失败"));
+        assertEquals(ErrorCode.REDIS_SESSION_UNAVAILABLE,
+                assertThrows(BusinessException.class, () -> service.getUserId("token")).getErrorCode());
+    }
+
     /** 有效期配置错误必须在创建服务时失败，而非等到用户登录。 */
     @ParameterizedTest
     @ValueSource(longs = {0, -1, Long.MAX_VALUE})
