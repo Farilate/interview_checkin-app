@@ -6,6 +6,7 @@ import lombok.Getter;
 import java.time.Instant;
 import java.time.LocalDate;
 
+
 /**
  * 每日打卡成功后的响应。
  */

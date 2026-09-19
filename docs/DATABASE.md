@@ -80,11 +80,11 @@ database/init.sql
 
 ## 5. 打卡提交与并发写入（已实现分支）
 
-当前 CheckinRecordServiceImpl 校验用户与习惯归属，按业务日期查询已有记录；不存在则 INSERT，成功返回新记录。同日重复直接返回原记录，响应无 created 字段。数据库 uk_checkin_user_habit_date 是最终唯一性防线，预查询不能代替约束。
+当前 CheckinRecordServiceImpl 校验用户与习惯归属，按业务日期查询已有记录；不存在则 INSERT，成功返回新记录。首次创建返回 created=true，同日重复直接返回原记录且 created=false。数据库 uk_checkin_user_habit_date 是最终唯一性防线，预查询不能代替约束。
 
 服务没有声明整体事务，无外层事务时各 Mapper 操作独立提交；不能把它描述为已实现“整体事务失败回滚再启动新事务”。捕获 DuplicateKeyException 后按用户、习惯、日期回查；有记录则返回原记录，没有则抛回同一个原异常。不解析消息或索引名，其他类型数据库异常不进入该幂等分支。
 
-业务日期由 Clock 时区决定，UTC 打卡时间截断到毫秒写入 DATETIME(3)。每次请求只读取一次 Instant 并截断到毫秒，业务日期与 UTC 时间都从该瞬间派生。今日状态查询、连续天数和 Redis 业务缓存均未实现，不宣称已执行缓存失效。真实 MySQL Mapper 测试已重跑通过，真实 HTTP 并发验收仍待执行。
+业务日期由 Clock 时区决定，UTC 打卡时间截断到毫秒写入 DATETIME(3)。每次请求只读取一次 Instant 并截断到毫秒，业务日期与 UTC 时间都从该瞬间派生。今日状态和连续天数查询已实现，分别直接读取今日记录或截至当天的倒序日期。Redis 业务缓存未实现，不宣称已执行缓存失效。真实 MySQL Mapper 和 Service 10 线程并发测试通过，真实 HTTP 并发验收仍待执行。
 
 ## 6. Redis Key 设计
 
@@ -104,7 +104,7 @@ checkin:v1
 
 登录态放 Redis 是为了服务端认证和集中失效；今日状态和连续天数放 Redis 是为了减少重复查询。所有真实业务记录始终保存在 MySQL。
 
-当前仅登录态已接入，today/streak 仍为后续设计。会话摘要为原始 Token 的 SHA-256 小写十六进制字符串；不保存原始 Token、密码、issuedAt 或 expiresAt。有效期由 Redis TTL 管理，配置属性为 `app.session.ttl-seconds`，当前 YAML 使用 `SESSION_TTL_SECONDS` 注入。
+当前仅登录态缓存已接入，today/streak 缓存仍为后续设计，不能与已经实现的 MySQL 查询接口混淆。会话摘要为原始 Token 的 SHA-256 小写十六进制字符串；不保存原始 Token、密码、issuedAt 或 expiresAt。有效期由 Redis TTL 管理，配置属性为 `app.session.ttl-seconds`，当前 YAML 使用 `SESSION_TTL_SECONDS` 注入。
 
 同一用户可拥有多个独立会话，登出只删除本次令牌的键。拦截器通过认证服务确认 MySQL 用户存在；不存在则删除当前会话并返回 401。损坏或非正数用户 ID 会话也会被撤销。会话读、写、删除的数据访问异常统一返回 50301；清理失败时同样返回 50301，不放行。
 

@@ -11,7 +11,7 @@
 | Phase 3：统一响应和异常处理 | 统一 DTO、参数校验、全局异常处理、HTTP/code 映射 | 合法与非法请求均符合 `API.md`；内部错误不泄露 SQL、凭证或堆栈 |
 | Phase 4：登录和 Redis 登录态 | BCrypt 验证；随机 Token；Redis Session；当前用户查询与上下文；登出；独立 SQL 准备演示账户 | 正确/错误密码、账户不存在、Session 过期均符合契约；Redis 中 Session 有真实 TTL；前端 userId 不能替代登录身份 |
 | Phase 5：打卡项管理 | 创建习惯、当前用户分页列表、名称校验及用户隔离 | 数据真实写入 MySQL；刷新后仍可查询；不同用户互相隔离；空列表正常 |
-| Phase 6：每日打卡和并发安全 | POST /habits/{habitId}/checkins 提交已实现；Clock、唯一键冲突回查；今日状态查询仍待实现 | 重复返回原记录；真实并发最终只有一条；单次取时和重复键按记录回查已修复；今日状态接口待验收 |
+| Phase 6：每日打卡和并发安全 | PUT /habits/{habitId}/checkins/today 与今日状态 GET 已实现；Clock、唯一键冲突回查 | 首次 created=true，重复 false；Service + MySQL 10 线程并发通过；HTTP 鉴权并发仍待验收 |
 | Phase 7：连续打卡算法 | 后端按 `LocalDate` 计算 streak；实现独立 streak GET 接口 | 验证今天/昨天锚点、断签、跨月、跨年；结果不使用总次数代替 |
 | Phase 8：Redis 业务缓存 | 接入 today/streak 短 TTL 缓存；Cache Miss 回源；打卡提交后删除相关缓存；业务缓存失败回退 MySQL | 第二次查询可命中缓存；手动删除 Key 后能回源；打卡后旧缓存被失效；缓存故障不影响已提交 MySQL 数据 |
 | Phase 9：UniApp 前端 | 创建 Vue 3 UniApp H5 工程；统一请求层、登录页、列表页、创建表单和打卡交互 | H5 构建成功；页面真实请求后端；处理 401、503、提交中、空列表和错误提示 |
@@ -20,18 +20,18 @@
 
 ## 2. 当前进度与已确认决策
 
-当前进度：阶段 1–3 已有实现；阶段 4 已新增 `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`、BCrypt、Redis 固定 TTL 会话及独立演示 SQL。阶段 4 已修复输入边界、登录响应字段、ID 字符串格式、Redis 故障分类及已删除用户会话清理，并新增认证回归测试。真实 MySQL/Redis 登录与登出联调仍待执行，因此尚未完成阶段验收。阶段 5 的 Habit 创建、名称去重和当前用户分页查询已实现，已补充 HTTP 回归；真实存储接口联调与并发创建验收仍待执行。阶段 6 的打卡提交已实现，今日状态查询未实现；已修复跨午夜取时，重复键处理改为目标记录回查，真实 HTTP 并发待验收。阶段 7–11 仍待按用户授权逐步实施，CORS 随 H5 联调处理。
+当前进度：阶段 1–3 已有实现；阶段 4 已新增 `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`、BCrypt、Redis 固定 TTL 会话及独立演示 SQL。阶段 4 已修复输入边界、登录响应字段、ID 字符串格式、Redis 故障分类及已删除用户会话清理，并新增认证回归测试。真实 MySQL/Redis 登录与登出联调仍待执行，因此尚未完成阶段验收。阶段 5 的 Habit 创建、名称去重和当前用户分页查询已实现，已补充 HTTP 回归；真实存储接口联调与并发创建验收仍待执行。阶段 6 的新 PUT 打卡路径、created 标记、今日状态 GET 已实现；阶段 7 连续天数 GET 及日期算法已实现。HTTP 回归、算法边界和真实 MySQL Service 并发通过，HTTP 鉴权端到端联调仍待验收。阶段 8–11 仍待按用户授权逐步实施，CORS 随 H5 联调处理。
 
 阶段 4 的验收补充包含：登出删除当前会话、其他会话不受影响、登出后原令牌被拒绝、重复登出返回当前约定的 401；详见 `API.md` 和 `TEST_PLAN.md`。
 
-公共异常处理已改为按异常类型或明确业务原因选择 ErrorCode，移除 HTTP 状态反推；未知异常和无明确原因的容器错误安全回退 50001。此调整属于现有公共模块维护，不代表后续打卡业务已实现。
+公共异常处理已改为按异常类型或明确业务原因选择 ErrorCode，移除 HTTP 状态反推；未知异常和无明确原因的容器错误安全回退 50001。公共异常处理与打卡业务进度分别验收。
 
 以下决策不再作为待确认项：
 
 - 业务时区：`Asia/Shanghai`。
 - 今天未打卡但昨天已打卡时，连续天数保留截至昨天。
-- 每日打卡接口：`POST /api/v1/habits/{habitId}/checkins`（当前实现；原 PUT 方案未实现）。
-- 重复打卡按业务幂等成功返回同一记录，当前不返回 created 标记。
+- 每日打卡接口：`PUT /api/v1/habits/{habitId}/checkins/today`（旧 POST 路径已移除）。
+- 首次打卡 created=true；重复打卡按业务幂等成功返回同一记录，created=false。
 - 主线不做注册；手工执行独立 SQL 准备演示账户。注册仅作为主线全部完成后最后考虑的可选加分项，见第 6 节。
 - 不同用户允许同名习惯；同一用户内习惯名称唯一。
 - Session 默认 TTL：7200 秒。
@@ -43,7 +43,7 @@
 
 Phase 2 提供真实持久层；Phase 4 开始需要真实 MySQL 和 Redis；Phase 5 以后依赖后端当前用户身份。
 
-Phase 6 先解决每日打卡写入安全、幂等和今日状态；Phase 7 再完成连续天数的完整算法。Phase 6 当前 POST 响应不包含 streakDays/streakEndDate；Phase 7 通过独立 GET /streak 返回连续天数，不向打卡响应追加这些字段。
+Phase 6 先解决每日打卡写入安全、幂等和今日状态；Phase 7 再完成连续天数的完整算法。Phase 6 当前 PUT 响应不包含 streakDays/streakEndDate；Phase 7 已通过独立 GET /streak 返回 {streak}，不向打卡响应追加这些字段。
 
 Phase 8 只增加业务查询缓存；Redis Session 已在 Phase 4 中真实使用。Phase 9 必须在后端接口可用后再接入，不用 Mock 假装核心业务已完成。
 

@@ -327,13 +327,14 @@ class HabitContractTest {
     @Test
     void firstCheckinUsesServerIdentityAndBusinessDate() throws Exception {
         allowCheckin();
-        JsonNode data = check(send("POST", "/101/checkins?userId=8&date=2000-01-01", "owner",
+        JsonNode data = check(send("PUT", "/101/checkins/today?userId=8&date=2000-01-01", "owner",
                 "{\"userId\":8,\"checkinDate\":\"2000-01-01\"}"), 200, 0).get("data");
         assertEquals("9007199254740993", data.get("id").asString());
         assertEquals("101", data.get("habitId").asString());
         assertEquals("2026-09-20", data.get("checkinDate").asString());
         assertEquals("2026-09-19T16:00:00.123Z", data.get("checkedInAt").asString());
-        assertEquals(4, data.size());
+        assertEquals(5, data.size());
+        assertTrue(data.get("created").asBoolean());
         verify(records).insert(argThat(r -> r.getUserId() == 7L && r.getHabitId() == 101L
                 && r.getCheckinDate().equals(LocalDate.of(2026, 9, 20))
                 && r.getCheckedInAt().getNano() == 123_000_000));
@@ -351,10 +352,14 @@ class HabitContractTest {
             saved[0].setId(501L);
             return 1;
         }).when(records).insert(any());
-        JsonNode first = check(send("POST", "/101/checkins", "owner", null), 200, 0);
+        JsonNode first = check(send("PUT", "/101/checkins/today", "owner", null), 200, 0);
         when(clock.instant()).thenReturn(Instant.parse("2026-09-19T17:00:00Z"));
-        JsonNode second = check(send("POST", "/101/checkins", "owner", null), 200, 0);
-        assertEquals(first, second);
+        JsonNode second = check(send("PUT", "/101/checkins/today", "owner", null), 200, 0);
+        assertTrue(first.get("data").get("created").asBoolean());
+        assertFalse(second.get("data").get("created").asBoolean());
+        for (String field : List.of("id", "habitId", "checkinDate", "checkedInAt")) {
+            assertEquals(first.get("data").get(field), second.get("data").get(field));
+        }
         verify(records, times(1)).insert(any());
     }
 
@@ -366,8 +371,9 @@ class HabitContractTest {
         CheckinRecord winner = storedCheckin();
         when(records.findByUserHabitAndDate(7L, 101L, winner.getCheckinDate())).thenReturn(null, winner);
         doThrow(checkinDuplicate(key)).when(records).insert(any());
-        JsonNode data = check(send("POST", "/101/checkins", "owner", null), 200, 0).get("data");
+        JsonNode data = check(send("PUT", "/101/checkins/today", "owner", null), 200, 0).get("data");
         assertEquals("501", data.get("id").asString());
+        assertFalse(data.get("created").asBoolean());
         assertEquals("2026-09-19T16:00:00Z", data.get("checkedInAt").asString());
         verify(records, times(2)).findByUserHabitAndDate(7L, 101L, winner.getCheckinDate());
     }
@@ -377,7 +383,7 @@ class HabitContractTest {
     void checkinConflictWithoutWinnerIsInternalError() throws Exception {
         allowCheckin();
         doThrow(checkinDuplicate("uk_checkin_user_habit_date")).when(records).insert(any());
-        check(send("POST", "/101/checkins", "owner", null), 500, 50001);
+        check(send("PUT", "/101/checkins/today", "owner", null), 500, 50001);
     }
 
     /** 重复键异常的格式不影响判断；目标记录不存在时各种消息都必须继续报错。 */
@@ -389,7 +395,7 @@ class HabitContractTest {
                 new DuplicateKeyException("包装", new SQLException("uk_checkin_user_habit_date", "23000", 1452)),
                 new DuplicateKeyException("包装", new SQLException("uk_checkin_user_habit_date", "HY000", 1062)))) {
             doThrow(failure).when(records).insert(any());
-            check(send("POST", "/101/checkins", "owner", null), 500, 50001);
+            check(send("PUT", "/101/checkins/today", "owner", null), 500, 50001);
         }
     }
 
@@ -397,7 +403,7 @@ class HabitContractTest {
     @ParameterizedTest
     @ValueSource(strings = {"101", "0", "-1"})
     void checkinMissingHabitDoesNotTouchRecords(String id) throws Exception {
-        check(send("POST", "/" + id + "/checkins", "owner", null), 404, 40401);
+        check(send("PUT", "/" + id + "/checkins/today", "owner", null), 404, 40401);
         verifyNoInteractions(records);
     }
 
@@ -405,7 +411,7 @@ class HabitContractTest {
     @Test
     void checkinRejectsAnotherOwner() throws Exception {
         allowCheckin();
-        check(send("POST", "/101/checkins?userId=7", "other", null), 404, 40401);
+        check(send("PUT", "/101/checkins/today?userId=7", "other", null), 404, 40401);
         verify(habits).findByUserIdAndId(8L, 101L);
         verifyNoInteractions(records);
     }
@@ -413,10 +419,10 @@ class HabitContractTest {
     /** 认证与路径绑定失败必须发生在业务访问前。 */
     @Test
     void checkinAuthenticationAndMalformedId() throws Exception {
-        check(send("POST", "/101/checkins", null, null), 401, 40101);
-        check(send("POST", "/101/checkins", "expired", null), 401, 40101);
+        check(send("PUT", "/101/checkins/today", null, null), 401, 40101);
+        check(send("PUT", "/101/checkins/today", "expired", null), 401, 40101);
         for (String id : List.of("abc", "9223372036854775808")) {
-            check(send("POST", "/" + id + "/checkins", "owner", null), 400, 40001);
+            check(send("PUT", "/" + id + "/checkins/today", "owner", null), 400, 40001);
         }
         verifyNoInteractions(habits, records);
     }
@@ -426,15 +432,15 @@ class HabitContractTest {
     void checkinStorageFailures() throws Exception {
         allowCheckin();
         doThrow(new DataAccessResourceFailureException("private-db-detail")).when(records).insert(any());
-        check(send("POST", "/101/checkins", "owner", null), 503, 50302);
+        check(send("PUT", "/101/checkins/today", "owner", null), 503, 50302);
         doThrow(new DataIntegrityViolationException("private-db-detail")).when(records).insert(any());
-        check(send("POST", "/101/checkins", "owner", null), 500, 50001);
+        check(send("PUT", "/101/checkins/today", "owner", null), 500, 50001);
         when(records.findByUserHabitAndDate(anyLong(), anyLong(), any()))
                 .thenThrow(new DataAccessResourceFailureException("private-db-detail"));
-        check(send("POST", "/101/checkins", "owner", null), 503, 50302);
+        check(send("PUT", "/101/checkins/today", "owner", null), 503, 50302);
         when(habits.findByUserIdAndId(7L, 101L))
                 .thenThrow(new DataAccessResourceFailureException("private-db-detail"));
-        check(send("POST", "/101/checkins", "owner", null), 503, 50302);
+        check(send("PUT", "/101/checkins/today", "owner", null), 503, 50302);
     }
 
     /** 固定在午夜两侧分别发起请求，验证跨日、跨月、跨年和闰日的业务日期。 */
@@ -445,17 +451,114 @@ class HabitContractTest {
         allowCheckin();
         Instant time = Instant.parse(instant);
         when(clock.instant()).thenReturn(time);
-        JsonNode data = check(send("POST", "/101/checkins", "owner", null), 200, 0).get("data");
+        JsonNode data = check(send("PUT", "/101/checkins/today", "owner", null), 200, 0).get("data");
         assertEquals(time.atZone(ZoneId.of("Asia/Shanghai")).toLocalDate().toString(),
                 data.get("checkinDate").asString());
         assertEquals(time, Instant.parse(data.get("checkedInAt").asString()));
     }
 
-    /** 当前只开放 POST 集合路径，不把原规划 PUT 或今日状态 GET 误记为已实现。 */
+    /** 打卡仅接受新 PUT 路径；旧 POST 集合路径已移除，不能继续调用。 */
     @Test
     void checkinMethodContract() throws Exception {
-        check(send("PUT", "/101/checkins", "owner", null), 405, 40500);
-        check(send("GET", "/101/checkins", "owner", null), 405, 40500);
+        check(send("POST", "/101/checkins/today", "owner", null), 405, 40500);
+        check(send("POST", "/101/checkins", "owner", null), 404, 40400);
+    }
+
+    /** 今日状态只有 checkedIn 字段，无记录是正常 false，写入后重新查询为 true。 */
+    @Test
+    void todayStatusBeforeAndAfterCheckin() throws Exception {
+        allowCheckin();
+        CheckinRecord[] saved = new CheckinRecord[1];
+        when(records.findByUserHabitAndDate(7L, 101L, LocalDate.of(2026, 9, 20)))
+                .thenAnswer(call -> saved[0]);
+        doAnswer(call -> {
+            saved[0] = call.getArgument(0);
+            saved[0].setId(501L);
+            return 1;
+        }).when(records).insert(any());
+        JsonNode before = check(send("GET", "/101/checkins/today", "owner", null), 200, 0).get("data");
+        assertEquals(1, before.size());
+        assertFalse(before.get("checkedIn").asBoolean());
+        check(send("PUT", "/101/checkins/today", "owner", null), 200, 0);
+        JsonNode after = check(send("GET", "/101/checkins/today", "owner", null), 200, 0).get("data");
+        assertEquals(1, after.size());
+        assertTrue(after.get("checkedIn").asBoolean());
+        verify(records, times(1)).insert(any());
+    }
+
+    /** 查询只用当前业务日期，跨午夜后不能将昨天记录当作今日已打卡。 */
+    @Test
+    void todayStatusChangesAtBusinessMidnight() throws Exception {
+        allowCheckin();
+        when(records.findByUserHabitAndDate(7L, 101L, LocalDate.of(2026, 9, 19))).thenReturn(storedCheckin());
+        when(clock.instant()).thenReturn(Instant.parse("2026-09-19T15:59:59.999Z"));
+        assertTrue(check(send("GET", "/101/checkins/today", "owner", null), 200, 0)
+                .get("data").get("checkedIn").asBoolean());
+        when(clock.instant()).thenReturn(Instant.parse("2026-09-19T16:00:00Z"));
+        assertFalse(check(send("GET", "/101/checkins/today", "owner", null), 200, 0)
+                .get("data").get("checkedIn").asBoolean());
+        verify(records).findByUserHabitAndDate(7L, 101L, LocalDate.of(2026, 9, 20));
+        verify(records, never()).insert(any());
+    }
+
+    /** 连续天数响应按当前 DTO 仅包含 streak，空历史为 0，昨天锚点有效。 */
+    @Test
+    void streakHttpResponseMatchesCurrentDto() throws Exception {
+        allowCheckin();
+        JsonNode empty = check(send("GET", "/101/streak", "owner", null), 200, 0).get("data");
+        assertEquals(1, empty.size());
+        assertEquals(0, empty.get("streak").asInt());
+        when(records.findDatesThrough(7L, 101L, LocalDate.of(2026, 9, 20)))
+                .thenReturn(List.of(LocalDate.of(2026, 9, 19), LocalDate.of(2026, 9, 18)));
+        assertEquals(2, check(send("GET", "/101/streak", "owner", null), 200, 0)
+                .get("data").get("streak").asInt());
+        verify(records, never()).insert(any());
+    }
+
+    /** 两个 GET 均需要认证；他人/不存在习惯及非正数 ID 当前返回 40401。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"/checkins/today", "/streak"})
+    void checkinQueriesEnforceAuthenticationAndOwnership(String suffix) throws Exception {
+        allowCheckin();
+        check(send("GET", "/101" + suffix, null, null), 401, 40101);
+        check(send("GET", "/101" + suffix, "expired", null), 401, 40101);
+        check(send("GET", "/101" + suffix + "?userId=7", "other", null), 404, 40401);
+        for (String id : List.of("999", "0", "-1")) {
+            check(send("GET", "/" + id + suffix, "owner", null), 404, 40401);
+        }
+        for (String id : List.of("abc", "9223372036854775808")) {
+            check(send("GET", "/" + id + suffix, "owner", null), 400, 40001);
+        }
+        verifyNoInteractions(records);
+    }
+
+    /** 请求体与查询参数不能伪造查询身份或业务日期。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"/checkins/today", "/streak"})
+    void checkinQueriesIgnoreClientDateAndIdentity(String suffix) throws Exception {
+        allowCheckin();
+        check(send("GET", "/101" + suffix + "?userId=8&date=2000-01-01", "owner",
+                "{\"userId\":8,\"date\":\"2000-01-01\"}"), 200, 0);
+        if (suffix.equals("/streak")) {
+            verify(records).findDatesThrough(7L, 101L, LocalDate.of(2026, 9, 20));
+        } else {
+            verify(records).findByUserHabitAndDate(7L, 101L, LocalDate.of(2026, 9, 20));
+        }
+        verify(clock, times(1)).instant();
+    }
+
+    /** 查询阶段数据库故障不能包装成 false/0 的正常业务结果。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"/checkins/today", "/streak"})
+    void checkinQueriesPropagateDatabaseFailures(String suffix) throws Exception {
+        allowCheckin();
+        when(records.findByUserHabitAndDate(anyLong(), anyLong(), any()))
+                .thenThrow(new DataAccessResourceFailureException("private-db-detail"));
+        when(records.findDatesThrough(anyLong(), anyLong(), any()))
+                .thenThrow(new DataAccessResourceFailureException("private-db-detail"));
+        check(send("GET", "/101" + suffix, "owner", null), 503, 50302);
+        when(habits.findByUserIdAndId(7L, 101L)).thenThrow(new DataIntegrityViolationException("private-db-detail"));
+        check(send("GET", "/101" + suffix, "owner", null), 500, 50001);
     }
 
     /** 构造当前用户拥有的习惯，并模拟数据库主键回填。 */

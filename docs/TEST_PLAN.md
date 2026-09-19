@@ -34,8 +34,8 @@
 
 | 编号 | 场景 | 预期 |
 | --- | --- | --- |
-| M08 | 第一次 `POST /habits/{habitId}/checkins` | HTTP 200/code=0，返回新记录；MySQL 新增 1 条记录 |
-| M09 | 同日重复调用 POST | HTTP 200/code=0，不提供 created 标记；返回同一已有记录；MySQL 总计仍 1 条 |
+| M08 | 第一次 `PUT /habits/{habitId}/checkins/today` | HTTP 200/code=0，created=true，返回新记录；MySQL 新增 1 条记录 |
+| M09 | 同日重复调用 PUT | HTTP 200/code=0，created=false；返回同一已有记录；MySQL 总计仍 1 条 |
 | M10 | 快速重复点击/网络重试 | 不产生重复记录；前端按钮禁用不是最终正确性条件 |
 | M11 | 并发打卡 | 对同一用户、习惯、业务日期并发发起多次请求；最终 MySQL `COUNT(*)=1`，仅一次创建成功，其余返回已有记录 |
 | M12 | 直接验证数据库唯一约束 | 重复插入相同 `(user_id, habit_id, checkin_date)` 必须命中 `uk_checkin_user_habit_date` |
@@ -71,7 +71,7 @@
 | --- | --- | --- |
 | M26 | 统一响应 | 成功及 400/401/404/405/500/503 均符合 `code/message/data` 结构 |
 | M27 | 密码与敏感信息 | MySQL 只存 BCrypt 哈希；源码、SQL、日志不包含真实密码或完整 Token |
-| M28 | H5 完整链路 | 登录 → 创建 → 列表 → POST 打卡 → 今日状态/连续天数 → 刷新，全程真实 REST API |
+| M28 | H5 完整链路 | 登录 → 创建 → 列表 → PUT 打卡 → 今日状态/连续天数 → 刷新，全程真实 REST API |
 | M29 | 前端异常处理 | 请求失败/超时不显示虚假成功；401 清理 Token；503 不错误地当成退出登录 |
 | M30 | 构建与启动 | 后端 Maven 测试/构建成功；前端 H5 构建成功；按 README 能完成数据库初始化和启动 |
 
@@ -117,13 +117,14 @@
 | SessionServiceTest | 13 | 摘要键、固定 TTL 调用、不续期、无效身份值、非法 TTL 和 Redis 故障分类 | Java 21 下 verify 通过 |
 | AuthControllerTest | 8 | 生产认证组件的 MVC 登录、当前用户、登出、重复登出、多会话隔离及 50301 响应 | Java 21 下 verify 通过 |
 | DemoDataTest | 1 | 生产 BCrypt 编码器验证公开演示 SQL 哈希，SQL 不含明文密码 | Java 21 下 clean verify 验证 |
-| HabitContractTest | 61 | 随机端口真实 HTTP；生产 Habit Controller/Service、鉴权配置、创建校验、重名、用户隔离、分页和故障分类；Mapper/认证依赖使用替身 | 本轮 verify 通过 |
-| CheckinRecordServiceTest | 3 | 单次取时跨午夜一致性、重复键回查成功、回查为空原异常对象传播 | 本轮定向测试通过 |
+| HabitContractTest | 70 | 随机端口真实 HTTP；生产 Habit Controller/Service、鉴权配置、创建校验、重名、用户隔离、分页和故障分类；Mapper/认证依赖使用替身 | 本轮 verify 通过 |
+| CheckinRecordServiceTest | 17 | 单次取时、重复键回查、created 标记、空历史/今天/昨天锚点/断签/跨月跨年闰日/400 天序列/午夜切换 | 本轮定向测试通过 |
+| CheckinConcurrencyIT | 1 | 真实 MySQL、固定 Clock、10 个并发 Service 调用；一次创建、同一记录、数据库一条、毫秒时间一致；定向清理数据 | 本轮通过 |
 | PersistenceIT | 10 | 真实 MySQL 中三个 Mapper、字段映射、分页、用户隔离、用户名/习惯名唯一、打卡唯一及复合外键 | 本轮 -Pmysql-it verify 重跑通过 |
 
-此前一次公共异常、认证与 Habit 全量代码验证使用 Java 21.0.12.1 / Maven 3.9.11 / Spring Boot 4.1.1，执行 `verify`：普通回归共 150 项，0 失败、0 错误、0 跳过，可执行 JAR 打包成功。报告位于 `backend/target/surefire-reports/`。认证及 Habit 测试使用外部存储替身，不连接真实 MySQL/Redis；生产业务仍使用真实 Mapper 和 Redis 客户端。
+本轮 Java 21.0.12.1 / Maven 3.9.11 / Spring Boot 4.1.1 执行 -Pmysql-it verify：普通测试 176 项，真实 MySQL 集成 11 项，合计 187 项，0 失败、0 错误、0 跳过，打包成功。Surefire 和 Failsafe 报告分别位于 backend/target/surefire-reports/ 与 failsafe-reports/。HTTP 测试使用外部存储替身；真实并发测试通过生产 Service 和 Mapper 访问 MySQL，仅替换 Clock。
 
-MySQL Server 具体版本缺少 SELECT VERSION() 证据，已移除原具体数字；下次真实联调查询后记录。PersistenceIT 的最近记录使用隔离 MySQL 测试实例及专用空库，执行 `-Pmysql-it clean verify`。10 项持久层测试通过，结束后独立查询三表行数均为 0，测试事务已回滚。当前规则为不同用户允许同名、同一用户名称唯一；现有测例不包含多线程并发验证。报告目录为 `backend/target/failsafe-reports/`，构建产物可能被后续 clean 清理。
+MySQL Server 具体版本缺少 SELECT VERSION() 证据，已移除原具体数字；下次真实联调查询后记录。PersistenceIT 的最近记录使用隔离 MySQL 测试实例及专用空库，执行 `-Pmysql-it clean verify`。10 项持久层测试通过，结束后独立查询三表行数均为 0，测试事务已回滚。当前规则为不同用户允许同名、同一用户名称唯一；PersistenceIT 本身不包含多线程并发；新增 CheckinConcurrencyIT 已验证真实 MySQL 的 Service 并发。报告目录为 `backend/target/failsafe-reports/`，构建产物可能被后续 clean 清理。
 
 认证回归执行时工具环境中的 Wrapper 启动失败，使用其缓存的同版本 Maven 并显式指定本机仓库完成验证；这不代表项目 Wrapper 已损坏。Mockito 有动态加载测试代理提示，未影响本次 Java 21 构建结果。
 
@@ -154,13 +155,13 @@ MySQL Server 具体版本缺少 SELECT VERSION() 证据，已移除原具体数�
 | 演示 SQL | 在隔离演示库手工执行，真实 BCrypt 登录成功；重复执行不覆盖已有用户密码，不作为并发注册验收 |
 | 有效期配置 | 非正数或不能安全转换为毫秒的 TTL 在启动时拒绝 |
 
-Habit 创建、去重和分页接口已实现并补测，真实存储接口验收仍待执行。打卡提交已实现并补测。CORS、H5、今日状态、业务缓存、连续天数算法及端到端并发属于后续阶段，仍按第 2–7 节和实施计划验收，不作为当前已完成能力。
+Habit 创建、去重和分页接口已实现并补测，真实存储接口验收仍待执行。打卡、今日状态和连续天数已实现并补测。CORS、H5、业务缓存及 HTTP 鉴权端到端并发属于后续阶段，仍按第 2–7 节和实施计划验收，不作为当前已完成能力。
 
 开发运行和 PersistenceIT 的 local 配置从 backend/config/ 读取；ApiContractTest 显式激活 test profile，不加载 application-local.yml。配置隔离调整时执行过 clean verify（87 项通过），并检查正式 JAR 和 .jar.original 均不含本地配置或旧初始化器；随后无 Token 路由补测执行 verify（88 项通过），此前有效 Token 路由补测和 test profile 隔离执行 verify（89 项通过），这些补测未执行 clean。真实配置由 Git 忽略，不得随打包文件分发；SQL 尚未实际导入数据库。
 
 ## 11. 可选加分项：用户注册验收（主线完成后最后做）
 
-注册不属于主线必做验收；Phase 1–11 主线功能、联调、必做测试及演示准备全部完成后，才按单独授权最后实施。未实现注册不影响主线交付。以下仅为选择实施加分项后的验收计划，不计入普通测试集（现有 153 项）；实施前先确定开放范围、成功响应、用户名冲突业务码及是否自动登录。
+注册不属于主线必做验收；Phase 1–11 主线功能、联调、必做测试及演示准备全部完成后，才按单独授权最后实施。未实现注册不影响主线交付。以下仅为选择实施加分项后的验收计划，不计入普通测试集（现有 176 项）；实施前先确定开放范围、成功响应、用户名冲突业务码及是否自动登录。
 
 | 场景 | 计划验收要求 |
 | --- | --- |
@@ -178,7 +179,7 @@ Habit 创建、去重和分页接口已实现并补测，真实存储接口验�
 注册实现时再新增测试代码，现阶段不调整既有测试数量或执行结果。
 ## 12. Habit 创建、去重与分页回归
 
-HabitContractTest 扩展后共 61 项（Habit 43 项、打卡 18 项），使用随机端口和生产 JSON/MVC 配置、HabitController、HabitServiceImpl、AuthInterceptor 及异常处理；仅替换 Mapper 与认证依赖。执行 Java 21 的 Maven -Pmysql-it verify，普通回归 150 项及真实 MySQL 持久层 10 项均通过，合计 160 项，打包成功。
+HabitContractTest 共 70 项：原 Habit 创建/分页 43 项、打卡提交 18 项、今日状态/连续天数 HTTP 查询 9 项。使用随机端口和生产 Controller、Service、鉴权、JSON 与异常配置，仅替换存储和 Clock。全量结果见第 9 节。
 
 覆盖：
 
@@ -197,14 +198,20 @@ HabitContractTest 扩展后共 61 项（Habit 43 项、打卡 18 项），使用
 
 已修复：创建返回 201；创建与列表使用字符串 ID 及带 Z 的 UTC 时间；名称 trim 后按 Unicode 码点计长，描述最多 200 码点且空白转 NULL。测试覆盖 50 个名称 emoji、200 个描述 emoji、边界超限、Long 大整数列表 ID、三种索引限定名，以及主键/其他索引/伪造名称/错误号或 SQLState 不符的拒绝误分类。数据库原始未知异常仍返回 50001。列表与总数分别查询，不保证并发修改下的同一快照，这不属于本次修复范围。
 
-## 13. 打卡提交测试与未完成项
+## 13. 打卡、今日状态和连续天数回归
 
-新增 18 项 HTTP 用例，复用生产 HabitController、CheckinRecordServiceImpl、鉴权与 JSON/异常配置，固定可注入时钟并替换 Mapper。覆盖首次提交、顺序重复、并发冲突分支回查、查不到获胜记录、非目标异常、归属隔离、伪造身份/日期无效、认证与非法路径参数、各阶段数据库故障、UTC 毫秒、午夜两侧/跨月/跨年/闰日、POST 方法契约。
+- 打卡已迁移到 PUT /habits/{habitId}/checkins/today，旧 POST 路径返回 404，新路径 POST 返回 405。
+- 首次 created=true；顺序重复和冲突回查返回 created=false，记录 ID 和原始时间不变。
+- 今日状态 GET 只有 checkedIn 字段：无记录为 false，打卡后为 true，跨业务午夜重新查询。
+- 连续天数 GET 只有 streak 字段，不能读取旧设计的 streakDays/streakEndDate 等字段。
+- 两个 GET 覆盖认证、归属隔离、缺失及非法 ID、客户端伪造日期/身份无效、数据库故障不伪装为 false/0、统一 JSON 与 no-store。
+- Service 覆盖空历史、今天/昨天锚点、前天才有记录、断签、跨月、跨年、闰日、平年二月和 400 天长序列；午夜跨日后断签连续数清零。
+- 保留单次取时跨午夜测试和 DuplicateKeyException 回查成功/原异常对象传播测试。
 
-本轮 -Pmysql-it verify：普通测试 150 项、PersistenceIT 10 项，0 失败、0 错误、0 跳过。真实 MySQL 测试每例事务回滚，不等于真实 HTTP 并发验证或 Redis 登录联调；固定时钟的午夜两侧用例也不等于验证一次请求中跨午夜的行为。
+## 14. 真实 MySQL 并发测试与验收边界
 
-已修复：只读取一次 Instant 并截断毫秒，再派生业务日期及 UTC checkedInAt；重复键处理删除 contains/索引名识别，按目标记录回查，查不到原样抛出异常。当前非正数 habitId 返回 40401 而非原设计 40001；POST 路径和响应字段见 API.md，原 PUT 及 created 标记并未实现。今日状态 GET、连续天数及缓存尚未实现，阶段 6 不标记为全部验收完成。
+CheckinConcurrencyIT 使用真实 Service、Mapper 和 MySQL，以固定 Clock 防止运行过程中跨日。10 个线程同时提交，断言仅一个 created=true、所有响应为同一记录且时间一致、数据库最终只有一条记录且持久化时间与响应相同。线程准备、起跑、结果等待和终止均设超时。
 
-新增 CheckinRecordServiceTest 三项定向回归：模拟时钟下一次读取跨午夜，断言实际只调用一次 instant 且写入/响应时间和日期一致；没有 JDBC 原因及索引名仍可通过回查返回原记录；回查为空使用 assertSame 验证抛出同一个原始 DuplicateKeyException。
+测试为每次运行创建独立随机用户。清理覆盖数据准备失败情形；只有工作线程终止后，才按本次用户名依次删除打卡记录、习惯、用户，避免遗留记录或影响已有数据。若线程无法终止，则失败并保留数据供排查，不一边写一边删。PersistenceIT 仍使用各测例事务回滚。
 
-本轮仅运行 CheckinRecordServiceTest 与 HabitContractTest：合计 64 项全部通过，0 失败、0 错误、0 跳过；未重跑全量测试、真实 MySQL 集成或 HTTP 并发验收。普通测试集现有 153 项，新增数量不计作全量已执行结果。
+本轮这两组真实 MySQL 测试共 11 项通过。它们不等于 HTTP + Redis 认证端到端并发；该链路及 H5 联调仍待验收。今日状态与连续天数当前直接查询 MySQL，Redis 业务缓存未实现。非正数 habitId 当前返回 40401，本轮未修改该业务行为。
