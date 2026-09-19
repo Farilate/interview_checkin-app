@@ -33,7 +33,7 @@ database/init.sql
 
 数据库不得存储明文密码或 Session Token。
 
-后续正式注册复用 users 表和 `uk_users_username`，本次不变更 SQL。用户名规范化后写入，密码保存 BCrypt 哈希；并发重复用户名由数据库最终拒绝，Service 识别对应约束并返回专用冲突错误。是否注册后创建 Redis Session 尚待确定；不能将跨存储失败视为天然可共同回滚。
+主线全部完成后，若实施注册这一可选加分项，则复用 users 表和 `uk_users_username`，本次不变更 SQL。用户名规范化后写入，密码保存 BCrypt 哈希；并发重复用户名由数据库最终拒绝，Service 识别对应约束并返回专用冲突错误。是否注册后创建 Redis Session 尚待确定；不能将跨存储失败视为天然可共同回滚。
 
 ## 3. habits
 

@@ -66,10 +66,6 @@ Redis 会话写入失败时不得返回登录成功。
 
 受保护请求由 AuthInterceptor 查询 Redis，将身份写入本次 HttpServletRequest 属性；`GET /auth/me` 再查询 MySQL 返回安全用户字段。`POST /auth/logout` 删除当前令牌对应的会话，其他令牌不受影响；重复登出被拦截并返回 401。拦截器还通过认证服务确认 MySQL 用户存在，否则撤销当前会话。Redis 会话数据访问故障统一为 50301。H5 跨域配置留待前端联调阶段实现。
 
-### 4.1.1 用户注册（后续独立扩展）
-
-后续注册作为独立认证扩展：请求 DTO → Service 校验与 BCrypt → Mapper 写入 users，由用户名唯一约束保证并发安全。不使用启动回调创建用户。是否公开放行、是否注册后创建 Redis Session 在实施前确定；自动登录若被采用，必须明确 MySQL 已提交而 Session 写入失败时的行为。具体规划见 IMPLEMENTATION_PLAN.md 第 6 节。
-
 ### 4.2 每日打卡（后续阶段）
 
 鉴权 → 捕获一次业务日期 D → 校验习惯属于当前用户 → MySQL 事务尝试插入 → 数据库唯一约束兜底 → 提交成功后删除今日状态与连续天数缓存 → 基于 MySQL 真实数据构造响应 → 前端展示。
@@ -139,3 +135,8 @@ MySQL 是最终业务数据来源；Redis 只承担服务端登录态和查询�
 本期不实现复杂的缓存并发控制协议、分布式锁或跨 MySQL/Redis 强一致事务。
 
 相关文档：`docs/REQUIREMENTS.md`、`docs/DATABASE.md`、`docs/API.md`、`docs/IMPLEMENTATION_PLAN.md`、`docs/TEST_PLAN.md`。
+
+
+## 8. 可选加分项：用户注册（主线完成后最后做）
+
+注册仅作为 Phase 1–11 主线全部完成后最后考虑的可选加分项，不影响主线交付和验收。若单独授权实施：请求 DTO → Service 校验与 BCrypt → Mapper 写入 users，由用户名唯一约束保证并发安全。不使用启动回调创建用户。是否公开放行、是否注册后创建 Redis Session 在实施前确定；自动登录若被采用，必须明确 MySQL 已提交而 Session 写入失败时的行为。具体规划见 IMPLEMENTATION_PLAN.md 第 6 节。
