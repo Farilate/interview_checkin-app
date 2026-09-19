@@ -24,7 +24,9 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final SessionService sessionService;
 
-    /** 注入用户查询、密码校验和会话访问组件，保持各自职责独立。 */
+    /**
+     * 注入用户查询、密码校验和会话访问组件，保持各自职责独立。
+     */
     public AuthServiceImpl(
             UserMapper userMapper,
             PasswordEncoder passwordEncoder,
@@ -76,7 +78,9 @@ public class AuthServiceImpl implements AuthService {
         );
     }
 
-    /** 撤销当前令牌；不删除用户数据，也不使该用户的其他登录会话失效。 */
+    /**
+     * 撤销当前令牌；不删除用户数据，也不使该用户的其他登录会话失效。
+     */
     @Override
     public void logout(String token) {
         sessionService.deleteSession(token);

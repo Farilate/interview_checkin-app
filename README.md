@@ -5,7 +5,7 @@
 ## 当前进度
 
 阶段 1–3 的项目骨架、MySQL 持久层及统一响应已具备；阶段 4 已新增登录、查询当前用户、登出、Redis Session 代码及独立演示 SQL，尚未完成登录模块验收。
-习惯、打卡业务及前端仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续实现。当前接口契约见 [API 文档](docs/API.md)。
+阶段 5 的 Habit 创建、去重及当前用户分页查询已实现，真实存储接口联调仍待验收。打卡业务及前端仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续实现。当前接口契约见 [API 文档](docs/API.md)。
 
 ## 后端环境与启动
 
@@ -114,7 +114,7 @@ $env:DB_PASSWORD = $credential.GetNetworkCredential().Password
 ```
 
 IDEA 运行时在 Environment variables 中配置相同变量。MySQL 会话时区设为 UTC；Model 中 `LocalDateTime` 字段须由后续业务层按
-UTC 填入，`LocalDate` 保存业务日期。Mapper 使用参数绑定；习惯和打卡记录查询均包含用户 ID，后续 Service 必须传入服务端身份，不能信任前端
+UTC 填入，`LocalDate` 保存业务日期。Mapper 使用参数绑定；习惯和打卡记录查询均包含用户 ID，Habit Service 已传入服务端身份，后续业务同样必须遵守，不能信任前端
 userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3–32 位 ASCII 字母、数字或下划线，密码限制为 8–72 个 UTF-8 字节。数据库采用 ASCII 二进制排序规则进行精确比较。
 
 ## Phase 2 集成测试
@@ -131,7 +131,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 .\mvnw.cmd -B -ntp -Pmysql-it clean verify
 ```
 
-普通 `clean verify` 执行 58 项公共 HTTP 契约检查和 30 项认证回归和 1 项演示哈希验证并打包，不执行 `PersistenceIT`；报告位于 `backend/target/surefire-reports/`。启用 `mysql-it` 后额外运行 10 项真实 MySQL 持久层测试，报告位于 `backend/target/failsafe-reports/`。
+普通 `clean verify` 执行 58 项公共 HTTP 契约检查、30 项认证回归、1 项演示哈希验证和 32 项 Habit HTTP 回归（共 121 项）并打包，不执行 `PersistenceIT`；报告位于 `backend/target/surefire-reports/`。启用 `mysql-it` 后额外运行 10 项真实 MySQL 持久层测试，报告位于 `backend/target/failsafe-reports/`。
 
 持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，不代表业务接口或 HTTP 并发验收已完成。应用启动不再执行账户写入，测试仍必须指向专用测试库。
 
@@ -142,7 +142,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
   编译需要启用注解处理。配置依据：[Lombok Maven 说明](https://projectlombok.org/setup/maven)。
 - 不同用户允许同名习惯，同一用户内名称唯一；数据库约束为 `uk_habits_user_name(user_id, name)`，按 `utf8mb4_0900_ai_ci` 排序规则判重。
 - 已有表不会随建表脚本变更自动升级，应确认数据库已包含约定的唯一索引。
-- 习惯名称 trim 和 HTTP 409 / `40901` 属于 Phase 5 的业务接口要求；当前已落实数据库约束。
+- Habit 创建已执行名称 trim、用户内查重及插入唯一键冲突转 HTTP 409 / `40901`；分页查询只使用当前用户身份。创建当前返回 200，响应 ID/时间与原设计的差异见 API.md。
 
 ## 异常处理约定
 
@@ -150,7 +150,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 
 ## 验证结果与限制
 
-2026-09-19，Java 21.0.12.1 / Maven 3.9.11 下生产路由边界补测后的 `verify` 构建成功：89 项测试全部通过，0 失败、0 错误、0 跳过。其中公共 HTTP 契约测试 58 项、认证回归 30 项、演示哈希验证 1 项；认证回归使用外部存储替身。
+2026-09-19，Java 21.0.12.1 / Maven 3.9.11 下 Habit 补测后的 `verify` 构建成功：121 项测试全部通过，0 失败、0 错误、0 跳过。其中公共 HTTP 契约 58 项、认证回归 30 项、演示哈希验证 1 项、Habit HTTP 回归 32 项；认证和 Habit 回归使用外部存储替身。
 
 真实 MySQL 的 10 项持久层测试在此前回归中通过，认证修复后未重跑。真实 MySQL/Redis 登录联调、实际会话到期、断网故障、演示 SQL 实际导入和 H5 尚未验收，阶段 4 因此尚未完成全部验收。CORS 留待 H5 联调阶段处理。
 
