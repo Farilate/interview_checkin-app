@@ -24,4 +24,7 @@ public class CheckinResponse {
 
     /** 实际打卡时间，使用 UTC 时间。 */
     private final Instant checkedInAt;
+
+    /** 本次请求是否真正创建了新的打卡记录。*/
+    private final boolean created;
 }

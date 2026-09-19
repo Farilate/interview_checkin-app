@@ -14,6 +14,9 @@ import org.springframework.http.HttpStatus;
 import com.example.checkin.dto.CheckinResponse;
 import com.example.checkin.service.CheckinRecordService;
 import org.springframework.web.bind.annotation.PathVariable;
+import com.example.checkin.dto.StreakResponse;
+import com.example.checkin.dto.TodayCheckinStatusResponse;
+import org.springframework.web.bind.annotation.PutMapping;
 
 /**
  * 打卡项接口。
@@ -70,11 +73,11 @@ public class HabitController {
     /**
      * 对指定打卡项执行今日打卡。
      *
-     * <p>当前用户 ID 来自服务端认证结果，
-     * habitId 来自请求路径。
-     * 同一天重复请求返回已有打卡记录，保证接口幂等。
+     * <p>接口具备幂等性：
+     * 第一次请求创建记录；
+     * 同一天重复请求返回已有记录。
      */
-    @PostMapping("/{habitId}/checkins")
+    @PutMapping("/{habitId}/checkins/today")
     public ApiResponse<CheckinResponse> checkIn(
             @PathVariable long habitId,
             HttpServletRequest request) {
@@ -85,6 +88,51 @@ public class HabitController {
 
         return ApiResponse.ok(
                 checkinRecordService.checkIn(userId, habitId)
+        );
+    }
+
+    /**
+     * 查询指定打卡项的当前连续打卡天数。
+     */
+    @GetMapping("/{habitId}/streak")
+    public ApiResponse<StreakResponse> getStreak(
+            @PathVariable long habitId,
+            HttpServletRequest request) {
+
+        Long userId = (Long) request.getAttribute(
+                AuthInterceptor.CURRENT_USER_ID
+        );
+
+        int streak = checkinRecordService.getCurrentStreak(
+                userId,
+                habitId
+        );
+
+        return ApiResponse.ok(
+                new StreakResponse(streak)
+        );
+    }
+
+    /**
+     * 查询指定打卡项今天是否已经打卡。
+     */
+    @GetMapping("/{habitId}/checkins/today")
+    public ApiResponse<TodayCheckinStatusResponse> getTodayCheckinStatus(
+            @PathVariable long habitId,
+            HttpServletRequest request) {
+
+        Long userId = (Long) request.getAttribute(
+                AuthInterceptor.CURRENT_USER_ID
+        );
+
+        boolean checkedIn =
+                checkinRecordService.hasCheckedInToday(
+                        userId,
+                        habitId
+                );
+
+        return ApiResponse.ok(
+                new TodayCheckinStatusResponse(checkedIn)
         );
     }
 }
