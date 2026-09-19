@@ -1,6 +1,6 @@
 # REST API 设计
 
-实现范围：认证及 Habit 创建、去重、分页查询已实现，第 2–4 节描述当前行为；第 5–8 节为后续打卡及前端契约。真实 MySQL/Redis 接口联调仍待验收，测试状态见 [测试计划](TEST_PLAN.md)。
+实现范围：认证、Habit 创建/去重/分页及打卡提交已实现，第 2–5 节描述当前行为；第 6–8 节为后续今日状态、连续天数及前端契约。真实 MySQL/Redis 接口联调仍待验收，测试状态见 [测试计划](TEST_PLAN.md)。
 
 ## 1. 公共约定
 
@@ -218,60 +218,36 @@ Response：HTTP 200。
 
 非法分页（非数字、超出 int 范围、page<1、pageSize 不在 1–100）返回 HTTP 400 / 40001。偏移使用 long；列表与总数分别查询，当前不承诺并发写入下的同一快照。排序由 Mapper SQL 保证。
 
-## 5. 每日打卡
+## 5. 每日打卡（提交已实现）
 
-### `PUT /api/v1/habits/{habitId}/checkins/today`
+### `POST /api/v1/habits/{habitId}/checkins`
 
-登录要求：是。
+需要登录。当前采用 POST，原计划 PUT /checkins/today 未实现。请求不需要 Body；服务端不读取额外 Body，也不使用查询参数里的 userId、日期或时间。
 
-Request：无 Body；不接受 `userId`、日期、时间戳或连续天数。
-
-该接口按“当前用户 + 当前习惯 + 当前业务日期”定义资源，因此重复调用具有幂等语义。
-
-首次打卡 Response：HTTP 200。Phase 6 仅返回打卡结果，连续天数由 Phase 7 的独立接口负责。
+首次和同日重复打卡均返回 HTTP 200、code=0。重复请求返回原记录 ID 和原始时间；不返回 created、checkedIn、businessZone、recordId、date 或连续天数字段。
 
 ```json
 {
   "code": 0,
   "message": "ok",
   "data": {
-    "recordId": "501",
+    "id": "501",
     "habitId": "101",
-    "date": "2026-09-17",
-    "businessZone": "Asia/Shanghai",
-    "checkedIn": true,
-    "created": true,
-    "checkedInAt": "2026-09-17T02:00:00.000Z"
+    "checkinDate": "2026-09-20",
+    "checkedInAt": "2026-09-19T16:00:00.123Z"
   }
 }
 ```
 
-同一业务日期重复打卡：
+业务日期由可注入 Clock 的时区确定，TimeConfig 默认 Asia/Shanghai，可通过 app.business-zone（环境变量 APP_BUSINESS_ZONE）配置；有业务数据后不能随意改变时区。时间按 UTC 毫秒保存，与 DATETIME(3) 对齐。ID 按字符串返回。
 
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "recordId": "501",
-    "habitId": "101",
-    "date": "2026-09-17",
-    "businessZone": "Asia/Shanghai",
-    "checkedIn": true,
-    "created": false,
-    "checkedInAt": "2026-09-17T02:00:00.000Z"
-  }
-}
-```
+- 缺少或失效令牌：40101。
+- habitId 非数字或超出 long 范围：40001；当前未声明正数校验，0/负数按查询不到习惯返回 40401。
+- 习惯不存在或属于他人：40401，不访问打卡记录。
+- 数据库连接故障：50302；其他未分类数据异常：50001。
+- 已存在同日记录：直接返回，不再次插入；插入发生 DuplicateKeyException 后按当前用户、习惯、日期回查，找到则返回原记录，查不到则继续抛出原异常，不能伪装成功。
 
-主要错误：
-
-- `40001`：非法 habitId 或传入服务端专属字段。
-- `40401`：习惯不存在或不属于当前用户。
-
-只有 `uk_checkin_user_habit_date` 唯一约束冲突可以按重复成功处理；其他数据库错误不得吞掉。
-
-幂等范围是同用户、同习惯、同业务日期。跨午夜后的新请求属于新业务日期，可以产生新一天的一条合法记录。
+**已修复与验收边界：**每次请求只读取一次 Clock.instant()，先截断到毫秒，再从同一 Instant 派生业务日期和 UTC 时间。重复键处理只根据目标三元组记录是否存在确认幂等结果，不解析消息、索引名称或 JDBC 错误号。此策略确认目标记录已存在，不推断原异常具体来自哪个索引。真实 HTTP 并发唯一性尚未验收。
 
 ## 6. 查询今日打卡状态
 
@@ -353,6 +329,6 @@ Response：HTTP 200。
 
 打卡按钮提交中可禁用以改善体验，但并发正确性不能依赖前端按钮状态。
 
-`PUT /checkins/today` 成功后使用响应中的 checkedIn、created 更新打卡状态；message 统一为 ok，“今日已打卡”由前端根据 created=false 展示。连续天数在 Phase 7 通过独立 GET /streak 查询，PUT 响应不包含 streakDays/streakEndDate。
+当前 POST /habits/{habitId}/checkins 成功后使用返回记录更新页面，不能读取尚不存在的 created/checkedIn 字段，也不能区分首次与重复。刷新后的今日状态由后续 GET 接口提供；连续天数由 Phase 7 独立 GET /streak 提供。
 
 独立 GET 使用 Redis 短 TTL 缓存；若缓存刚好仍是旧值，后续会在短 TTL 过期或写操作失效缓存后回到 MySQL 真实结果。页面重新激活或跨日时应重新查询，以后端业务日期为准。

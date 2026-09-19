@@ -11,6 +11,9 @@ import org.springframework.web.bind.annotation.*;
 import com.example.checkin.dto.PageRequest;
 import com.example.checkin.dto.PageResponse;
 import org.springframework.http.HttpStatus;
+import com.example.checkin.dto.CheckinResponse;
+import com.example.checkin.service.CheckinRecordService;
+import org.springframework.web.bind.annotation.PathVariable;
 
 /**
  * 打卡项接口。
@@ -23,11 +26,14 @@ import org.springframework.http.HttpStatus;
 public class HabitController {
 
     private final HabitService habitService;
+    private final CheckinRecordService checkinRecordService;
 
-    public HabitController(HabitService habitService) {
+    public HabitController(
+            HabitService habitService,
+            CheckinRecordService checkinRecordService) {
         this.habitService = habitService;
+        this.checkinRecordService = checkinRecordService;
     }
-
     /**
      * 创建新的打卡项，写入成功返回 201 Created；错误仍由统一异常处理决定状态。
      */
@@ -58,6 +64,27 @@ public class HabitController {
 
         return ApiResponse.ok(
                 habitService.getHabits(userId, pageRequest)
+        );
+    }
+
+    /**
+     * 对指定打卡项执行今日打卡。
+     *
+     * <p>当前用户 ID 来自服务端认证结果，
+     * habitId 来自请求路径。
+     * 同一天重复请求返回已有打卡记录，保证接口幂等。
+     */
+    @PostMapping("/{habitId}/checkins")
+    public ApiResponse<CheckinResponse> checkIn(
+            @PathVariable long habitId,
+            HttpServletRequest request) {
+
+        Long userId = (Long) request.getAttribute(
+                AuthInterceptor.CURRENT_USER_ID
+        );
+
+        return ApiResponse.ok(
+                checkinRecordService.checkIn(userId, habitId)
         );
     }
 }

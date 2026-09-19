@@ -37,6 +37,7 @@ spring:
 app:
   session:
     ttl-seconds: ${SESSION_TTL_SECONDS:7200}
+  business-zone: ${BUSINESS_ZONE:Asia/Shanghai}
 
 mybatis:
   configuration:
