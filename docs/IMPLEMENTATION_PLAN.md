@@ -20,7 +20,7 @@
 
 ## 2. 当前进度与已确认决策
 
-当前进度：阶段 1–3 已有实现；阶段 4 已新增 `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`、BCrypt、Redis 固定 TTL 会话及独立演示 SQL。阶段 4 已修复输入边界、登录响应字段、ID 字符串格式、Redis 故障分类及已删除用户会话清理，并新增认证回归测试。真实 MySQL/Redis 登录与登出联调仍待执行，因此尚未完成阶段验收。阶段 5 的 Habit 创建、名称去重和当前用户分页查询已实现，已补充 HTTP 回归；真实存储接口联调与并发创建验收仍待执行。阶段 6 的新 PUT 打卡路径、created 标记、今日状态 GET 已实现；阶段 7 连续天数 GET 及日期算法已实现。HTTP 回归、算法边界和真实 MySQL Service 并发通过，HTTP 鉴权端到端联调仍待验收。阶段 8–11 仍待按用户授权逐步实施，CORS 随 H5 联调处理。
+当前进度：阶段 1–3 已有实现；阶段 4 已新增 `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`、BCrypt、Redis 固定 TTL 会话及独立演示 SQL。阶段 4 已修复输入边界、登录响应字段、ID 字符串格式、Redis 故障分类及已删除用户会话清理，并新增认证回归测试。真实 MySQL/Redis 登录与登出联调仍待执行，因此尚未完成阶段验收。阶段 5 的 Habit 创建、名称去重和当前用户分页查询已实现，已补充 HTTP 回归；真实存储接口联调与并发创建验收仍待执行。阶段 6 的新 PUT 打卡路径、created 标记、今日状态 GET 已实现；阶段 7 连续天数 GET 及日期算法已实现。HTTP 回归、算法边界和真实 MySQL Service 并发通过，HTTP 鉴权端到端联调仍待验收。阶段 8 today/streak 缓存已接入查询、回填和打卡后失效，默认 TTL 为 30 秒；损坏值、批量删除、TTL 配置及亚毫秒边界已修复，用户已确认真实 Memurai 的 TTL、Key 内容、写后失效和自然过期验收通过；网络故障降级及并发旧值窗口的真实验收尚未确认。阶段 9–11 仍待按用户授权逐步实施，CORS 随 H5 联调处理。
 
 阶段 4 的验收补充包含：登出删除当前会话、其他会话不受影响、登出后原令牌被拒绝、重复登出返回当前约定的 401；详见 `API.md` 和 `TEST_PLAN.md`。
 
@@ -35,7 +35,7 @@
 - 主线不做注册；手工执行独立 SQL 准备演示账户。注册仅作为主线全部完成后最后考虑的可选加分项，见第 6 节。
 - 不同用户允许同名习惯；同一用户内习惯名称唯一。
 - Session 默认 TTL：7200 秒。
-- 业务缓存采用短 TTL Cache-Aside；MySQL 为最终事实来源。
+- 业务缓存采用 Cache-Aside；当前默认 TTL 30 秒，MySQL 为最终事实来源。采用 30 秒短 TTL 收敛极端并发旧值，属于最终一致性，不保证强一致。
 
 阶段 5 已修复接口契约：创建返回 201；Habit ID 为字符串；响应 UTC 时间带 Z；名称 trim 后按 Unicode 码点校验，空白描述转 NULL；仅明确的习惯名称唯一约束冲突返回 40901。HTTP 回归和构建通过，真实存储及并发验收仍待执行，见 TEST_PLAN.md 第 12 节。
 
@@ -45,7 +45,7 @@ Phase 2 提供真实持久层；Phase 4 开始需要真实 MySQL 和 Redis；Pha
 
 Phase 6 先解决每日打卡写入安全、幂等和今日状态；Phase 7 再完成连续天数的完整算法。Phase 6 当前 PUT 响应不包含 streakDays/streakEndDate；Phase 7 已通过独立 GET /streak 返回 {streak}，不向打卡响应追加这些字段。
 
-Phase 8 只增加业务查询缓存；Redis Session 已在 Phase 4 中真实使用。Phase 9 必须在后端接口可用后再接入，不用 Mock 假装核心业务已完成。
+Phase 8 已增加业务查询缓存（默认 30 秒，上限为下一业务日零点）；Redis Session 已在 Phase 4 中真实使用。Phase 9 必须在后端接口可用后再接入，不用 Mock 假装核心业务已完成。
 
 ## 4. 每阶段检查规则
 

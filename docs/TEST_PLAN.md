@@ -117,12 +117,14 @@
 | SessionServiceTest | 13 | 摘要键、固定 TTL 调用、不续期、无效身份值、非法 TTL 和 Redis 故障分类 | Java 21 下 verify 通过 |
 | AuthControllerTest | 8 | 生产认证组件的 MVC 登录、当前用户、登出、重复登出、多会话隔离及 50301 响应 | Java 21 下 verify 通过 |
 | DemoDataTest | 1 | 生产 BCrypt 编码器验证公开演示 SQL 哈希，SQL 不含明文密码 | Java 21 下 clean verify 验证 |
-| HabitContractTest | 74 | 随机端口真实 HTTP；生产 Habit Controller/Service、鉴权配置、创建校验、重名、用户隔离、分页和故障分类；Mapper/认证依赖使用替身 | 本轮 verify 通过 |
-| CheckinRecordServiceTest | 17 | 单次取时、重复键回查、created 标记、空历史/今天/昨天锚点/断签/跨月跨年闰日/400 天序列/午夜切换 | 本轮定向测试通过 |
+| HabitContractTest | 78 | 随机端口真实 HTTP；生产 Habit Controller/Service、鉴权配置、创建校验、重名、用户隔离、分页和故障分类；Mapper/认证依赖使用替身 | 本轮 verify 通过 |
+| CheckinRecordServiceTest | 23 | 单次取时、重复键回查、created 标记、空历史/今天/昨天锚点/断签/跨月跨年闰日/400 天序列/午夜切换 | 本轮定向测试通过 |
+| CheckinCacheServiceImplTest | 6 | 已有缓存实现测试，使用 Redis 替身 | 本轮通过 |
+| CheckinCacheServiceTest | 17 | 键隔离、编码、TTL、午夜、故障及缓存缺陷修复验证 | 本轮通过 |
 | CheckinConcurrencyIT | 1 | 真实 MySQL、固定 Clock、10 个并发 Service 调用；一次创建、同一记录、数据库一条、毫秒时间一致；定向清理数据 | 本轮通过 |
 | PersistenceIT | 10 | 真实 MySQL 中三个 Mapper、字段映射、分页、用户隔离、用户名/习惯名唯一、打卡唯一及复合外键 | 本轮 -Pmysql-it verify 重跑通过 |
 
-2026-09-20，Java 21.0.12.1 / Maven 3.9.11 / Spring Boot 4.1.1：先执行 clean verify，Surefire 181 项通过且未运行真实 MySQL 测试；再执行 -Pmysql-it clean verify，Surefire 181 项和 Failsafe 11 项全部通过，合计 192 项，0 失败、0 错误、0 跳过，两次打包均成功。报告分别位于 backend/target/surefire-reports/ 与 failsafe-reports/。HTTP 测试使用存储替身；真实并发测试通过生产 Service 和 Mapper 访问 MySQL，仅替换 Clock。
+2026-09-20，Java 21.0.12.1 / Maven 3.9.11 执行 clean verify：214 项普通测试全部通过，0 失败、0 错误、0 跳过，打包成功。此次未执行 mysql-it；历史 11 项真实 MySQL 集成通过记录不能替代缓存接入后的存储联调。报告位于 backend/target/surefire-reports/。
 
 MySQL Server 具体版本缺少 SELECT VERSION() 证据，已移除原具体数字；下次真实联调查询后记录。PersistenceIT 的最近记录使用隔离 MySQL 测试实例及专用空库，执行 `-Pmysql-it clean verify`。10 项持久层测试通过，结束后独立查询三表行数均为 0，测试事务已回滚。当前规则为不同用户允许同名、同一用户名称唯一；PersistenceIT 本身不包含多线程并发；新增 CheckinConcurrencyIT 已验证真实 MySQL 的 Service 并发。报告目录为 `backend/target/failsafe-reports/`，构建产物可能被后续 clean 清理。
 
@@ -155,7 +157,7 @@ MySQL Server 具体版本缺少 SELECT VERSION() 证据，已移除原具体数�
 | 演示 SQL | 在隔离演示库手工执行，真实 BCrypt 登录成功；重复执行不覆盖已有用户密码，不作为并发注册验收 |
 | 有效期配置 | 非正数或不能安全转换为毫秒的 TTL 在启动时拒绝 |
 
-Habit 创建、去重和分页接口已实现并补测，真实存储接口验收仍待执行。打卡、今日状态和连续天数已实现并补测。CORS、H5、业务缓存及 HTTP 鉴权端到端并发属于后续阶段，仍按第 2–7 节和实施计划验收，不作为当前已完成能力。
+Habit 创建、去重和分页接口已实现并补测，真实存储接口验收仍待执行。打卡、今日状态和连续天数已实现并补测。Redis 业务缓存已接入且已修复值校验、批量删除和 TTL 边界；CORS、H5 及 HTTP 鉴权端到端并发属于后续验收，仍按第 2–7 节和实施计划验收，不作为当前已完成能力。
 
 开发运行和 PersistenceIT 的 local 配置从 backend/config/ 读取；ApiContractTest 显式激活 test profile，不加载 application-local.yml。配置隔离调整时执行过 clean verify（87 项通过），并检查正式 JAR 和 .jar.original 均不含本地配置或旧初始化器；随后无 Token 路由补测执行 verify（88 项通过），此前有效 Token 路由补测和 test profile 隔离执行 verify（89 项通过），这些补测未执行 clean。真实配置由 Git 忽略，不得随打包文件分发；SQL 尚未实际导入数据库。
 
@@ -179,7 +181,7 @@ Habit 创建、去重和分页接口已实现并补测，真实存储接口验�
 注册实现时再新增测试代码，现阶段不调整既有测试数量或执行结果。
 ## 12. Habit 创建、去重与分页回归
 
-HabitContractTest 共 74 项：原 Habit 创建/分页 43 项、打卡提交 16 项、今日状态/连续天数 HTTP 查询 9 项、三个接口的非正数 ID 边界 6 项。使用随机端口和生产 Controller、Service、鉴权、JSON 与异常配置，仅替换存储和 Clock。全量结果见第 9 节。
+HabitContractTest 共 78 项（其中本轮新增缓存协作 4 项）：原 Habit 创建/分页 43 项、打卡提交 16 项、今日状态/连续天数 HTTP 查询 9 项、三个接口的非正数 ID 边界 6 项。使用随机端口和生产 Controller、Service、鉴权、JSON 与异常配置，仅替换存储和 Clock。全量结果见第 9 节。
 
 覆盖：
 
@@ -214,7 +216,7 @@ CheckinConcurrencyIT 使用真实 Service、Mapper 和 MySQL，以固定 Clock �
 
 测试为每次运行创建独立随机用户。清理覆盖数据准备失败情形；只有工作线程终止后，才按本次用户名依次删除打卡记录、习惯、用户，避免遗留记录或影响已有数据。若线程无法终止，则失败并保留数据供排查，不一边写一边删。PersistenceIT 仍使用各测例事务回滚。
 
-本轮这两组真实 MySQL 测试共 11 项通过。它们不等于 HTTP + Redis 认证端到端并发；该链路及 H5 联调仍待验收。今日状态与连续天数当前直接查询 MySQL，Redis 业务缓存未实现。三个 habitId 路径已添加 @Positive：0/负数返回 40001，合法正整数但不存在或无权访问仍返回 40401。
+缓存接入前，这两组真实 MySQL 测试共 11 项通过，本轮未重跑。它们不等于 HTTP + Redis 认证端到端并发；该链路及 H5 联调仍待验收。今日状态与连续天数已接入 Redis 缓存，Miss 回源 MySQL；真实 Memurai 的 TTL、Key 内容、写后失效和自然过期已由用户确认通过，详见第 17 节。三个 habitId 路径已添加 @Positive：0/负数返回 40001，合法正整数但不存在或无权访问仍返回 40401。
 
 ## 15. Phase 6/7 收尾配置与参数校验
 
@@ -222,6 +224,27 @@ CheckinConcurrencyIT 使用真实 Service、Mapper 和 MySQL，以固定 Clock �
 
 三个路径通过 MVC @Positive 校验 0/负数，新增六项参数化测试，断言 40001 且不调用 Habit/Checkin Mapper；保留合法 ID 不存在/无权访问的 40401 测试及非数字/溢出 40001 测试。未添加类级 @Validated 或新过滤器。
 
-并发测试已恢复 CheckinConcurrencyIT 命名，测试逻辑不变，与 PersistenceIT 一起仅由 mysql-it 的 Failsafe 执行；普通 clean verify 不访问真实 MySQL。缓存字段调整仅限 DATABASE.md 的 Phase 8 设计文字，没有新增缓存代码。
+并发测试已恢复 CheckinConcurrencyIT 命名，测试逻辑不变，与 PersistenceIT 一起仅由 mysql-it 的 Failsafe 执行；普通 clean verify 不访问真实 MySQL。随后业务缓存代码已由用户完成，本轮仅补充测试和同步实际实现。
 
-本轮验证结果：ApiContractTest 59 项、HabitContractTest 74 项、CheckinRecordServiceTest 17 项均通过；既有认证、会话、演示数据、真实 MySQL 并发和持久层测试也全部通过，共 192 项。没有执行 H5 或 HTTP + Redis 认证端到端并发验收。
+历史收尾验证结果为 192 项通过；缓存接入后的本轮结果见第 16 节。没有执行 H5 或 HTTP + Redis 认证端到端并发验收。
+
+## 16. Redis 业务缓存修复验证
+
+当前 today 只接受 0/1，streak 只接受非负整数；其他值作为 Miss 回源。putStreak 跳过负数写入；失效一次提交两个键。默认 TTL 为 30 秒，配置必须为正数，实际时长受午夜限制，不足 1ms 跳过回填。
+
+CheckinCacheServiceTest 共 17 项，覆盖键隔离、正常值、损坏值 Miss、生产缓存与业务 Service 组合回源并覆盖旧值、批量删除及失败降级、TTL 非法配置、午夜 <1ms/恰好 1ms 边界。原缺陷复现断言已改为验证修复，另保留既有 6 项 CheckinCacheServiceImplTest 和 HTTP/Service 回归。测试中显式传入 600 秒用于验证可配置 TTL，不代表默认值。
+
+Cache-Aside 仍允许极端并发旧值短暂回填，采用默认 30 秒 TTL 最终收敛，不引入分布式锁或强一致机制。TTL 单元测试只确认发送给客户端的 Duration；真实 Memurai TTL、Key 内容、写后失效和自然过期另有用户验收通过记录，见第 17 节。真实网络故障和并发回填窗口的验收尚未确认。
+
+## 17. 真实 Memurai 业务缓存验收记录
+
+记录日期：2026-09-20。来源：用户明确反馈验收成功。本轮仅同步文档，未由助手重跑命令；不计入 214 项自动化测试数量。未提供 Memurai 版本、原始命令输出或具体 TTL 观测数值，因此不补写这些信息。
+
+| 验收项目 | 结果 |
+| --- | --- |
+| 真实 Memurai TTL | 用户确认通过 |
+| 业务缓存 Key 内容 | 用户确认通过 |
+| 打卡写后缓存失效 | 用户确认通过 |
+| 缓存自然过期 | 用户确认通过 |
+
+上述结果适用于 Phase 8 业务缓存，不延伸为 Session 自然过期、网络故障降级、手动删键回源、跨午夜或 HTTP 鉴权端到端并发均已验收。Cache-Aside 仍采用短 TTL 最终收敛，不保证强一致；其余场景沿用各节待执行清单。

@@ -10,6 +10,7 @@ import com.example.checkin.mapper.HabitMapper;
 import com.example.checkin.mapper.CheckinRecordMapper;
 import com.example.checkin.model.CheckinRecord;
 import com.example.checkin.service.impl.CheckinRecordServiceImpl;
+import com.example.checkin.service.CheckinCacheService;
 import java.time.Clock;
 import java.time.ZoneId;
 import java.time.LocalDate;
@@ -67,6 +68,7 @@ class HabitContractTest {
     @Autowired Clock clock;
     @Autowired SessionService sessions;
     @Autowired AuthService auth;
+    @Autowired CheckinCacheService cache;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final JsonMapper json = JsonMapper.builder().build();
 
@@ -82,12 +84,16 @@ class HabitContractTest {
         @Bean HabitMapper habits() { return mock(HabitMapper.class); }
         @Bean SessionService sessions() { return mock(SessionService.class); }
         @Bean AuthService auth() { return mock(AuthService.class); }
+        @Bean
+        CheckinCacheService cache() {
+            return mock(CheckinCacheService.class);
+        }
     }
 
     /** 每例清除共享 Bean 的桩与调用记录；两个令牌分别对应两个服务端身份。 */
     @BeforeEach
     void setUp() {
-        reset(habits, records, clock, sessions, auth);
+        reset(habits, records, clock, sessions, auth, cache);
         when(clock.getZone()).thenReturn(ZoneId.of("Asia/Shanghai"));
         when(clock.instant()).thenReturn(Instant.parse("2026-09-19T16:00:00.123456789Z"));
         when(sessions.getUserId("expired")).thenReturn(null);
@@ -100,6 +106,18 @@ class HabitContractTest {
             habit.setId(101L);
             return 1;
         });
+        // Contract Test 默认模拟缓存未命中，让请求继续走原有数据库 Mock 逻辑。
+        when(cache.getToday(
+                anyLong(),
+                anyLong(),
+                any(LocalDate.class)
+        )).thenReturn(null);
+
+        when(cache.getStreak(
+                anyLong(),
+                anyLong(),
+                any(LocalDate.class)
+        )).thenReturn(null);
     }
 
     /** 创建由会话确定所属用户；保存 trim 后名称及 UTC 时间，不向外暴露 userId。 */
@@ -572,6 +590,51 @@ class HabitContractTest {
     void nonPositiveHabitIdIsBadRequest(String method, String suffix, String id) throws Exception {
         check(send(method, "/" + id + suffix, "owner", null), 400, 40001);
         verifyNoInteractions(habits, records);
+    }
+
+    /** false 与 0 均为缓存命中，仍先验证归属，但无需查询打卡记录。 */
+    @Test
+    void cachedNegativeResultsAvoidRecordQueries() throws Exception {
+        allowCheckin();
+        LocalDate day = LocalDate.of(2026, 9, 20);
+        when(cache.getToday(7L, 101L, day)).thenReturn(false);
+        when(cache.getStreak(7L, 101L, day)).thenReturn(0);
+        assertFalse(check(send("GET", "/101/checkins/today", "owner", null), 200, 0)
+                .get("data").get("checkedIn").asBoolean());
+        assertEquals(0, check(send("GET", "/101/streak", "owner", null), 200, 0)
+                .get("data").get("streak").asInt());
+        verifyNoInteractions(records);
+        verify(habits, times(2)).findByUserIdAndId(7L, 101L);
+    }
+
+    /** 已有缓存也不能绕过习惯归属检查。 */
+    @Test
+    void ownershipIsCheckedBeforeCacheAccess() throws Exception {
+        check(send("GET", "/101/checkins/today", "other", null), 404, 40401);
+        check(send("GET", "/101/streak", "other", null), 404, 40401);
+        verifyNoInteractions(cache, records);
+    }
+
+    /** 缓存 Miss 时返回 MySQL 结果并回填，包括 false 和 0。 */
+    @Test
+    void missesPopulateBothNegativeCaches() throws Exception {
+        allowCheckin();
+        LocalDate day = LocalDate.of(2026, 9, 20);
+        check(send("GET", "/101/checkins/today", "owner", null), 200, 0);
+        check(send("GET", "/101/streak", "owner", null), 200, 0);
+        verify(cache).putToday(7L, 101L, day, false);
+        verify(cache).putStreak(7L, 101L, day, 0);
+    }
+
+    /** 首次成功与顺序重复均主动失效本日两个查询缓存。 */
+    @Test
+    void successfulAndRepeatedCheckinEvictCache() throws Exception {
+        allowCheckin();
+        LocalDate day = LocalDate.of(2026, 9, 20);
+        check(send("PUT", "/101/checkins/today", "owner", null), 200, 0);
+        when(records.findByUserHabitAndDate(7L, 101L, day)).thenReturn(storedCheckin());
+        check(send("PUT", "/101/checkins/today", "owner", null), 200, 0);
+        verify(cache, times(2)).evict(7L, 101L, day);
     }
 
     /** 构造当前用户拥有的习惯，并模拟数据库主键回填。 */

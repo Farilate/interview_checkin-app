@@ -7,6 +7,7 @@ import com.example.checkin.mapper.CheckinRecordMapper;
 import com.example.checkin.mapper.HabitMapper;
 import com.example.checkin.model.CheckinRecord;
 import com.example.checkin.service.CheckinRecordService;
+import com.example.checkin.service.CheckinCacheService;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DuplicateKeyException;
 import java.util.List;
@@ -31,14 +32,18 @@ public class CheckinRecordServiceImpl
     private final CheckinRecordMapper checkinRecordMapper;
     private final HabitMapper habitMapper;
     private final Clock businessClock;
+    private final CheckinCacheService checkinCacheService;
 
     public CheckinRecordServiceImpl(
             CheckinRecordMapper checkinRecordMapper,
             HabitMapper habitMapper,
-            Clock businessClock) {
+            Clock businessClock,
+            CheckinCacheService checkinCacheService) {
+
         this.checkinRecordMapper = checkinRecordMapper;
         this.habitMapper = habitMapper;
         this.businessClock = businessClock;
+        this.checkinCacheService = checkinCacheService;
     }
 
     /**
@@ -50,18 +55,27 @@ public class CheckinRecordServiceImpl
     @Override
     public int getCurrentStreak(long userId, long habitId) {
 
-        // 同时确认习惯存在且属于当前用户。
+        // 先校验 Habit 是否属于当前用户。
         if (habitMapper.findByUserIdAndId(userId, habitId) == null) {
-            throw new BusinessException(
-                    ErrorCode.HABIT_NOT_FOUND
-            );
+            throw new BusinessException(ErrorCode.HABIT_NOT_FOUND);
         }
 
-        // 只读取一次业务时钟，确定当前业务日期。
         LocalDate today = businessClock.instant()
                 .atZone(businessClock.getZone())
                 .toLocalDate();
 
+        // 1. 先查 Redis。
+        Integer cached = checkinCacheService.getStreak(
+                userId,
+                habitId,
+                today
+        );
+
+        if (cached != null) {
+            return cached;
+        }
+
+        // 2. Cache Miss，再查 MySQL。
         List<LocalDate> dates =
                 checkinRecordMapper.findDatesThrough(
                         userId,
@@ -69,28 +83,30 @@ public class CheckinRecordServiceImpl
                         today
                 );
 
-        if (dates.isEmpty()) {
-            return 0;
-        }
-
-        /*
-         * 今天打过卡：从今天开始计算。
-         * 今天没打卡：从昨天开始计算。
-         */
-        LocalDate expected = dates.getFirst().equals(today)
-                ? today
-                : today.minusDays(1);
-
         int streak = 0;
 
-        for (LocalDate date : dates) {
-            if (!date.equals(expected)) {
-                break;
-            }
+        if (!dates.isEmpty()) {
+            LocalDate expected = dates.getFirst().equals(today)
+                    ? today
+                    : today.minusDays(1);
 
-            streak++;
-            expected = expected.minusDays(1);
+            for (LocalDate date : dates) {
+                if (!date.equals(expected)) {
+                    break;
+                }
+
+                streak++;
+                expected = expected.minusDays(1);
+            }
         }
+
+        // 3. 将计算结果回填 Redis，0 也需要缓存。
+        checkinCacheService.putStreak(
+                userId,
+                habitId,
+                today,
+                streak
+        );
 
         return streak;
     }
@@ -120,6 +136,12 @@ public class CheckinRecordServiceImpl
 
 
         if (existing != null) {
+            checkinCacheService.evict(
+                    userId,
+                    habitId,
+                    checkinDate
+            );
+
             return toResponse(existing, false);
         }
 
@@ -135,6 +157,13 @@ public class CheckinRecordServiceImpl
         );
         try {
             checkinRecordMapper.insert(record);
+
+            checkinCacheService.evict(
+                    userId,
+                    habitId,
+                    checkinDate
+            );
+
             return toResponse(record, true);
         } catch (DuplicateKeyException e) {
 
@@ -150,6 +179,12 @@ public class CheckinRecordServiceImpl
             if (existingRecord == null) {
                 throw e;
             }
+
+            checkinCacheService.evict(
+                    userId,
+                    habitId,
+                    checkinDate
+            );
 
             return toResponse(existingRecord, false);
         }
@@ -174,26 +209,43 @@ public class CheckinRecordServiceImpl
     @Override
     public boolean hasCheckedInToday(long userId, long habitId) {
 
-        // 同时检查习惯是否存在，以及是否属于当前登录用户。
+        // 先校验习惯归属，不能因为缓存存在就绕过权限/存在性检查。
         if (habitMapper.findByUserIdAndId(userId, habitId) == null) {
-            throw new BusinessException(
-                    ErrorCode.HABIT_NOT_FOUND
-            );
+            throw new BusinessException(ErrorCode.HABIT_NOT_FOUND);
         }
 
-        // 按业务时区确定今天。
         LocalDate today = businessClock.instant()
                 .atZone(businessClock.getZone())
                 .toLocalDate();
 
-        CheckinRecord record =
+        // 1. 先查 Redis。
+        Boolean cached = checkinCacheService.getToday(
+                userId,
+                habitId,
+                today
+        );
+
+        if (cached != null) {
+            return cached;
+        }
+
+        // 2. Cache Miss，再查 MySQL。
+        boolean checkedIn =
                 checkinRecordMapper.findByUserHabitAndDate(
                         userId,
                         habitId,
                         today
-                );
+                ) != null;
 
-        return record != null;
+        // 3. 回填 Redis。
+        checkinCacheService.putToday(
+                userId,
+                habitId,
+                today,
+                checkedIn
+        );
+
+        return checkedIn;
     }
 
 }

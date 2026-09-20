@@ -5,7 +5,7 @@
 ## 当前进度
 
 阶段 1–3 的项目骨架、MySQL 持久层及统一响应已具备；阶段 4 已新增登录、查询当前用户、登出、Redis Session 代码及独立演示 SQL，尚未完成登录模块验收。
-阶段 5 的 Habit 创建、去重及当前用户分页查询已实现，真实存储接口联调仍待验收。阶段 6 已实现 PUT /api/v1/habits/{habitId}/checkins/today、created 标记及今日状态 GET；阶段 7 已实现 GET /habits/{habitId}/streak（返回 streak）。旧 POST 路径已移除。业务缓存及前端仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续实现。当前接口契约见 [API 文档](docs/API.md)。
+阶段 5 的 Habit 创建、去重及当前用户分页查询已实现，真实存储接口联调仍待验收。阶段 6 已实现 PUT /api/v1/habits/{habitId}/checkins/today、created 标记及今日状态 GET；阶段 7 已实现 GET /habits/{habitId}/streak（返回 streak）。旧 POST 路径已移除。阶段 8 的 today/streak Redis 缓存已接入，校验与 TTL 边界已修复，用户已确认真实 Memurai 的 TTL、Key 内容、写后失效和自然过期验收通过（见测试计划）。前端仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续实现。当前接口契约见 [API 文档](docs/API.md)。
 
 ## 后端环境与启动
 
@@ -54,6 +54,7 @@ IDEA：将 `backend/pom.xml` 添加为 Maven 项目，项目 SDK、Maven 导入�
 | `SERVER_PORT`       | `8080`          | HTTP 监听端口                                        |
 | `REDIS_HOST` | `localhost` | 登录会话 Redis 地址 |
 | `REDIS_PORT` | `6379` | Redis 端口 |
+| `APP_CACHE_TTL_SECONDS` | `30` | today/streak 缓存 TTL 上限（秒）；与距下一业务日零点的时长取较小值 |
 | `APP_BUSINESS_ZONE` | `Asia/Shanghai` | 已接入 app.business-zone，打卡日期、今日状态和连续天数统一使用 |
 | `SESSION_TTL_SECONDS` | `7200` | 会话固定有效期，单位秒，应为正数；读取不续期 |
 | `SPRING_PROFILES_ACTIVE` | `local` | 当前默认加载 local 配置，可由运行环境覆盖 |
@@ -65,7 +66,7 @@ $env:SERVER_PORT = '8081'
 .\mvnw.cmd spring-boot:run
 ```
 
-Redis 地址和 Session TTL 已接入。Redis 认证及库编号可通过 Spring 配置属性 `spring.data.redis.username`、`spring.data.redis.password`、`spring.data.redis.database` 提供，或使用对应标准环境变量 `SPRING_DATA_REDIS_USERNAME`、`SPRING_DATA_REDIS_PASSWORD`、`SPRING_DATA_REDIS_DATABASE`；当前 YAML 未映射简写变量 `REDIS_USERNAME`、`REDIS_PASSWORD`、`REDIS_DATABASE`。业务时区已由 TimeConfig 接入，app.business-zone 默认 Asia/Shanghai；业务缓存 TTL 和 CORS 尚未接入。
+Redis 地址和 Session TTL 已接入。Redis 认证及库编号可通过 Spring 配置属性 `spring.data.redis.username`、`spring.data.redis.password`、`spring.data.redis.database` 提供，或使用对应标准环境变量 `SPRING_DATA_REDIS_USERNAME`、`SPRING_DATA_REDIS_PASSWORD`、`SPRING_DATA_REDIS_DATABASE`；当前 YAML 未映射简写变量 `REDIS_USERNAME`、`REDIS_PASSWORD`、`REDIS_DATABASE`。业务时区已由 TimeConfig 接入，app.business-zone 默认 Asia/Shanghai；业务缓存 TTL 已接入 APP_CACHE_TTL_SECONDS，默认 30 秒且不超过下一业务日零点；CORS 尚未接入。
 
 真实本地配置放在 `backend/config/application-local.yml`，不再放进 `src/main/resources/`。可复制 [配置示例](backend/config/application-local.example.yml) 后填写；真实文件由 Git 忽略，也不参与 Maven 打包。示例通过 `${DB_PASSWORD}` 引用环境变量；个人 local 文件也可以直接填写 `spring.datasource.password`，但不得提交或分发。若要用环境变量强制覆盖 local 中的直接配置，使用 `SPRING_DATASOURCE_PASSWORD`。应用启动不创建用户，原演示初始化配置已取消。
 
@@ -132,7 +133,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 .\mvnw.cmd -B -ntp -Pmysql-it clean verify
 ```
 
-普通 `clean verify` 由 Surefire 执行 181 项回归并打包，不执行真实 MySQL 测试。启用 mysql-it 后，Failsafe 额外执行 PersistenceIT（10 项）和 CheckinConcurrencyIT（1 项真实 MySQL 10 线程并发）。报告分别位于 backend/target/surefire-reports/ 与 failsafe-reports/。
+普通 `clean verify` 由 Surefire 执行 214 项回归并打包，不执行真实 MySQL 测试。启用 mysql-it 后，Failsafe 额外执行 PersistenceIT（10 项）和 CheckinConcurrencyIT（1 项真实 MySQL 10 线程并发）。报告分别位于 backend/target/surefire-reports/ 与 failsafe-reports/。
 
 持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，不代表业务接口或 HTTP 并发验收已完成。应用启动不再执行账户写入，测试仍必须指向专用测试库。
 
@@ -151,7 +152,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 
 ## 验证结果与限制
 
-2026-09-20，Java 21.0.12.1 / Maven 3.9.11 实际执行 clean verify：181 项通过；随后执行 -Pmysql-it clean verify：Surefire 181 项、Failsafe 11 项，合计 192 项，0 失败、0 错误、0 跳过，两次打包均成功。包含 59 项公共 HTTP 契约、74 项 Habit/打卡 HTTP、17 项 Service/连续天数测试。
+2026-09-20，Java 21.0.12.1 / Maven 3.9.11 执行 clean verify：214 项普通测试全部通过，0 失败、0 错误、0 跳过，打包成功。上述自动化缓存测试使用 Redis 替身，未执行 mysql-it；另于 2026-09-20 由用户确认真实 Memurai 的 TTL、Key 内容、写后失效和自然过期验收通过。此记录来自用户反馈，本轮仅同步文档，未重跑测试。
 
 真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。这不替代 HTTP + Redis 鉴权端到端并发验收。真实 MySQL/Redis 登录联调、实际会话到期、断网故障、演示 SQL 实际导入和 H5 尚未验收，阶段 4 因此尚未完成全部验收。CORS 留待 H5 联调阶段处理。
 
