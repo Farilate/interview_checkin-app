@@ -9,6 +9,7 @@ import com.example.checkin.model.CheckinRecord;
 import com.example.checkin.service.CheckinRecordService;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DuplicateKeyException;
+import java.util.List;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -40,6 +41,60 @@ public class CheckinRecordServiceImpl
         this.businessClock = businessClock;
     }
 
+    /**
+     * 查询当前连续打卡天数。
+     *
+     * <p>今天已经打卡时从今天开始向前计算；
+     * 今天尚未打卡时允许从昨天开始计算。
+     */
+    @Override
+    public int getCurrentStreak(long userId, long habitId) {
+
+        // 同时确认习惯存在且属于当前用户。
+        if (habitMapper.findByUserIdAndId(userId, habitId) == null) {
+            throw new BusinessException(
+                    ErrorCode.HABIT_NOT_FOUND
+            );
+        }
+
+        // 只读取一次业务时钟，确定当前业务日期。
+        LocalDate today = businessClock.instant()
+                .atZone(businessClock.getZone())
+                .toLocalDate();
+
+        List<LocalDate> dates =
+                checkinRecordMapper.findDatesThrough(
+                        userId,
+                        habitId,
+                        today
+                );
+
+        if (dates.isEmpty()) {
+            return 0;
+        }
+
+        /*
+         * 今天打过卡：从今天开始计算。
+         * 今天没打卡：从昨天开始计算。
+         */
+        LocalDate expected = dates.getFirst().equals(today)
+                ? today
+                : today.minusDays(1);
+
+        int streak = 0;
+
+        for (LocalDate date : dates) {
+            if (!date.equals(expected)) {
+                break;
+            }
+
+            streak++;
+            expected = expected.minusDays(1);
+        }
+
+        return streak;
+    }
+
     @Override
     public CheckinResponse checkIn(long userId, long habitId) {
 
@@ -63,8 +118,9 @@ public class CheckinRecordServiceImpl
                         checkinDate
                 );
 
+
         if (existing != null) {
-            return toResponse(existing);
+            return toResponse(existing, false);
         }
 
         CheckinRecord record = new CheckinRecord();
@@ -77,10 +133,9 @@ public class CheckinRecordServiceImpl
                         ZoneOffset.UTC
                 )
         );
-
         try {
             checkinRecordMapper.insert(record);
-            return toResponse(record);
+            return toResponse(record, true);
         } catch (DuplicateKeyException e) {
 
             // 并发请求可能同时通过预查询。以目标三元组的实际记录确认幂等结果，
@@ -93,11 +148,10 @@ public class CheckinRecordServiceImpl
                     );
 
             if (existingRecord == null) {
-                // 无法确认目标记录已存在，保留并抛出原异常，不伪装成重复成功。
                 throw e;
             }
 
-            return toResponse(existingRecord);
+            return toResponse(existingRecord, false);
         }
     }
 
@@ -105,15 +159,41 @@ public class CheckinRecordServiceImpl
      * 持久化对象转换为对外响应对象。
      */
     private CheckinResponse toResponse(
-            CheckinRecord record) {
+            CheckinRecord record,
+            boolean created) {
 
         return new CheckinResponse(
                 Long.toString(record.getId()),
                 Long.toString(record.getHabitId()),
                 record.getCheckinDate(),
-                record.getCheckedInAt()
-                        .toInstant(ZoneOffset.UTC)
+                record.getCheckedInAt().toInstant(ZoneOffset.UTC),
+                created
         );
+    }
+
+    @Override
+    public boolean hasCheckedInToday(long userId, long habitId) {
+
+        // 同时检查习惯是否存在，以及是否属于当前登录用户。
+        if (habitMapper.findByUserIdAndId(userId, habitId) == null) {
+            throw new BusinessException(
+                    ErrorCode.HABIT_NOT_FOUND
+            );
+        }
+
+        // 按业务时区确定今天。
+        LocalDate today = businessClock.instant()
+                .atZone(businessClock.getZone())
+                .toLocalDate();
+
+        CheckinRecord record =
+                checkinRecordMapper.findByUserHabitAndDate(
+                        userId,
+                        habitId,
+                        today
+                );
+
+        return record != null;
     }
 
 }

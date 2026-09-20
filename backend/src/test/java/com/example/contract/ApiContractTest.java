@@ -66,8 +66,18 @@ class ApiContractTest {
     /** 仅提供认证所需的业务结果，MVC 路由与拦截器仍使用生产实现。 */
     @Autowired SessionService sessionService;
     @Autowired AuthService authService;
+    @Autowired org.springframework.core.env.ConfigurableEnvironment environment;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final JsonMapper json = JsonMapper.builder().build();
+
+    /** test profile 不得通过显式 import 偷渡本机 local 配置；只检查来源名称，不输出配置值。 */
+    @Test
+    void testProfileDoesNotLoadLocalConfiguration() {
+        assertTrue(java.util.Arrays.asList(environment.getActiveProfiles()).contains("test"));
+        assertFalse(java.util.Arrays.asList(environment.getActiveProfiles()).contains("local"));
+        assertFalse(environment.getPropertySources().stream()
+                .anyMatch(source -> source.getName().contains("application-local")));
+    }
 
     /** 认证通过后，未知受保护路径应继续进入路由缺失处理，返回 40400 而非 40101。 */
     @Test

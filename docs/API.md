@@ -1,6 +1,6 @@
 # REST API 设计
 
-实现范围：认证、Habit 创建/去重/分页及打卡提交已实现，第 2–5 节描述当前行为；第 6–8 节为后续今日状态、连续天数及前端契约。真实 MySQL/Redis 接口联调仍待验收，测试状态见 [测试计划](TEST_PLAN.md)。
+实现范围：认证、Habit 创建/去重/分页、打卡提交、今日状态和连续天数已实现，第 2–7 节描述当前行为；第 8 节为后续前端消费约定。真实 MySQL/Redis 接口联调仍待验收，测试状态见 [测试计划](TEST_PLAN.md)。
 
 ## 1. 公共约定
 
@@ -220,11 +220,11 @@ Response：HTTP 200。
 
 ## 5. 每日打卡（提交已实现）
 
-### `POST /api/v1/habits/{habitId}/checkins`
+### `PUT /api/v1/habits/{habitId}/checkins/today`
 
-需要登录。当前采用 POST，原计划 PUT /checkins/today 未实现。请求不需要 Body；服务端不读取额外 Body，也不使用查询参数里的 userId、日期或时间。
+需要登录。已改为 PUT 今日资源路径，旧 POST /habits/{habitId}/checkins 已移除（有效认证下返回 40400）；对新路径发送 POST 返回 40500。请求不需要 Body；服务端不读取额外 Body，也不使用查询参数里的 userId、日期或时间。
 
-首次和同日重复打卡均返回 HTTP 200、code=0。重复请求返回原记录 ID 和原始时间；不返回 created、checkedIn、businessZone、recordId、date 或连续天数字段。
+首次和同日重复打卡均返回 HTTP 200、code=0。首次创建返回 created=true；顺序重复或并发冲突后回查成功返回 created=false，并保留原记录 ID 和原始时间。不返回 checkedIn、businessZone、recordId、date 或连续天数字段。
 
 ```json
 {
@@ -234,7 +234,8 @@ Response：HTTP 200。
     "id": "501",
     "habitId": "101",
     "checkinDate": "2026-09-20",
-    "checkedInAt": "2026-09-19T16:00:00.123Z"
+    "checkedInAt": "2026-09-19T16:00:00.123Z",
+    "created": true
   }
 }
 ```
@@ -242,79 +243,50 @@ Response：HTTP 200。
 业务日期由可注入 Clock 的时区确定，TimeConfig 默认 Asia/Shanghai，可通过 app.business-zone（环境变量 APP_BUSINESS_ZONE）配置；有业务数据后不能随意改变时区。时间按 UTC 毫秒保存，与 DATETIME(3) 对齐。ID 按字符串返回。
 
 - 缺少或失效令牌：40101。
-- habitId 非数字或超出 long 范围：40001；当前未声明正数校验，0/负数按查询不到习惯返回 40401。
+- habitId 为 0、负数、非数字或超出 long 范围：40001，在访问业务 Mapper 前拒绝。
 - 习惯不存在或属于他人：40401，不访问打卡记录。
 - 数据库连接故障：50302；其他未分类数据异常：50001。
 - 已存在同日记录：直接返回，不再次插入；插入发生 DuplicateKeyException 后按当前用户、习惯、日期回查，找到则返回原记录，查不到则继续抛出原异常，不能伪装成功。
 
-**已修复与验收边界：**每次请求只读取一次 Clock.instant()，先截断到毫秒，再从同一 Instant 派生业务日期和 UTC 时间。重复键处理只根据目标三元组记录是否存在确认幂等结果，不解析消息、索引名称或 JDBC 错误号。此策略确认目标记录已存在，不推断原异常具体来自哪个索引。真实 HTTP 并发唯一性尚未验收。
+**已修复与验收边界：**每次请求只读取一次 Clock.instant()，先截断到毫秒，再从同一 Instant 派生业务日期和 UTC 时间。重复键处理只根据目标三元组记录是否存在确认幂等结果，不解析消息、索引名称或 JDBC 错误号。此策略确认目标记录已存在，不推断原异常具体来自哪个索引。真实 MySQL 的 Service 层 10 线程并发已通过，HTTP + Redis 鉴权端到端并发尚未验收。
 
-## 6. 查询今日打卡状态
+## 6. 查询今日打卡状态（已实现）
 
 ### `GET /api/v1/habits/{habitId}/checkins/today`
 
-登录要求：是。
+需要登录，不需要 Body。按 Clock 的业务时区查询今天，只读取当前用户拥有的习惯；客户端传入的日期和 userId 不参与查询条件。
 
-无 Body、无日期参数。
-
-Response：HTTP 200。
+HTTP 200，当前响应只包含 checkedIn：
 
 ```json
 {
   "code": 0,
   "message": "ok",
-  "data": {
-    "habitId": "101",
-    "date": "2026-09-17",
-    "businessZone": "Asia/Shanghai",
-    "checkedIn": false,
-    "recordId": null,
-    "checkedInAt": null
-  }
+  "data": { "checkedIn": false }
 }
 ```
 
-没有今日记录是正常 `checkedIn=false`，不是 404。
+今天有记录返回 true；无记录是正常 false，不是 404。与早期设计不同，当前不返回 habitId、date、businessZone、recordId、checkedInAt。
 
-## 7. 查询当前连续打卡天数
+## 7. 查询当前连续打卡天数（已实现）
 
 ### `GET /api/v1/habits/{habitId}/streak`
 
-登录要求：是。
+需要登录，不需要 Body。按当前业务日期从 MySQL 读取截至当天的倒序打卡日期。今天有记录则从今天起算；今天没有但昨天有记录则从昨天起算；两天都没有记录则为 0。遇到断签停止，不使用总条数或历史最大连续天数代替当前连续天数。
 
-无 Body、无日期参数。
-
-今天尚未打卡但昨天有记录时，返回截至昨天的连续长度。
+HTTP 200，当前响应只包含 streak：
 
 ```json
 {
   "code": 0,
   "message": "ok",
-  "data": {
-    "habitId": "101",
-    "asOfDate": "2026-09-17",
-    "businessZone": "Asia/Shanghai",
-    "streakDays": 2,
-    "streakEndDate": "2026-09-16"
-  }
+  "data": { "streak": 2 }
 }
 ```
 
-无当前连续记录时：
+无记录返回 streak=0。字段名是 streak，当前不返回原设计的 streakDays、streakEndDate、asOfDate、habitId 或 businessZone。
 
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "habitId": "101",
-    "asOfDate": "2026-09-17",
-    "businessZone": "Asia/Shanghai",
-    "streakDays": 0,
-    "streakEndDate": null
-  }
-}
-```
+两个 GET 均设置 Cache-Control: no-store；缺少/失效令牌返回 40101，习惯不存在或属于他人返回 40401。0、负数、非数字或 long 溢出均返回 40001；合法正整数但资源不存在/无权访问仍返回 40401。数据库故障按统一分类返回错误，不能伪装为 false 或 0。当前查询直接访问 MySQL，尚未接入 Redis today/streak 缓存。
 
 ## 8. 前端消费约定
 
@@ -329,6 +301,6 @@ Response：HTTP 200。
 
 打卡按钮提交中可禁用以改善体验，但并发正确性不能依赖前端按钮状态。
 
-当前 POST /habits/{habitId}/checkins 成功后使用返回记录更新页面，不能读取尚不存在的 created/checkedIn 字段，也不能区分首次与重复。刷新后的今日状态由后续 GET 接口提供；连续天数由 Phase 7 独立 GET /streak 提供。
+PUT /habits/{habitId}/checkins/today 成功后使用记录和 created 标记更新页面；created=false 可展示“今日已打卡”。刷新或页面重新激活时调用今日状态 GET 读取 checkedIn，调用连续天数 GET 读取 streak，不再读取旧字段名。
 
-独立 GET 使用 Redis 短 TTL 缓存；若缓存刚好仍是旧值，后续会在短 TTL 过期或写操作失效缓存后回到 MySQL 真实结果。页面重新激活或跨日时应重新查询，以后端业务日期为准。
+两个 GET 当前直接读取 MySQL；后续 Phase 8 再接入 Redis 短 TTL 业务缓存。跨日或页面重新激活时应重新查询，连续天数由后端计算。

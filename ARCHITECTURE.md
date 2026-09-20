@@ -2,7 +2,7 @@
 
 ## 1. 设计状态与依据
 
-本文件同时说明当前实现和后续设计。阶段 1–3 已具备；阶段 4 已新增登录、当前用户查询、登出及 Redis Session 代码，尚未完成验收。阶段 5 的 Habit 创建、去重和分页查询已实现，真实存储接口联调仍待验收；打卡提交已实现，今日状态、连续天数、业务缓存及前端仍为后续设计；开发应遵循根目录 `AGENTS.md` 及相关文档。
+本文件同时说明当前实现和后续设计。阶段 1–3 已具备；阶段 4 已新增登录、当前用户查询、登出及 Redis Session 代码，尚未完成验收。阶段 5 的 Habit 创建、去重和分页查询已实现，真实存储接口联调仍待验收；打卡提交、今日状态和连续天数已实现，业务缓存及前端仍为后续设计；开发应遵循根目录 `AGENTS.md` 及相关文档。
 
 后端使用 Java 21 + Spring Boot；前端使用 UniApp + Vue 3，并以 H5 作为演示目标。
 
@@ -73,10 +73,12 @@ Redis 会话写入失败时不得返回登录成功。
 每日打卡接口采用：
 
 ```http
-POST /api/v1/habits/{habitId}/checkins
+PUT /api/v1/habits/{habitId}/checkins/today
 ```
 
-同一用户、同一习惯、同一业务日期内重复调用是幂等的：首次返回新记录，重复调用返回原记录；数据库唯一约束保证最多一条记录，真实 HTTP 并发仍待验收。
+同一用户、同一习惯、同一业务日期内重复调用是幂等的：首次返回新记录且 created=true，重复调用返回原记录且 created=false；数据库唯一约束保证最多一条记录，Service + MySQL 并发已验证，真实 HTTP 并发仍待验收。
+
+今日状态 GET 返回 {checkedIn}；连续天数 GET 返回 {streak}，两者先校验归属再查询 MySQL。连续天数根据倒序日期从今天或昨天起逐日递减，遇到断签停止。当前两个查询尚无 Redis 业务缓存。
 
 ### 4.3 业务缓存查询（后续阶段）
 
@@ -107,7 +109,7 @@ Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登�
 | `REDIS_HOST`、`REDIS_PORT` | 已接入；地址默认 localhost，端口默认 6379 |
 | `SPRING_DATA_REDIS_DATABASE` | Spring 标准环境变量，库默认 0；未映射简写 REDIS_DATABASE |
 | `SPRING_DATA_REDIS_USERNAME`、`SPRING_DATA_REDIS_PASSWORD` | Spring 标准 Redis 认证配置；未映射简写 REDIS_USERNAME / REDIS_PASSWORD |
-| `APP_BUSINESS_ZONE` | 规划项：默认 `Asia/Shanghai`，Phase 6 接入 |
+| `APP_BUSINESS_ZONE` | 已接入：默认 `Asia/Shanghai`，配置 app.business-zone，供业务 Clock 使用 |
 | `SESSION_TTL_SECONDS` | 当前 YAML 显式映射至 app.session.ttl-seconds，默认 7200 秒，须为正数；固定过期 |
 | `APP_CACHE_TTL_SECONDS` | 规划项：业务缓存短 TTL，默认 30 秒 |
 | `CORS_ALLOWED_ORIGINS` | 规划项：显式允许的 H5 Origin |
@@ -115,7 +117,7 @@ Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登�
 | `VITE_API_BASE_URL` | 规划项：前端 API 基础地址 |
 | `SPRING_PROFILES_ACTIVE` | 当前默认 local；可在运行环境覆盖 |
 
-演示账户来自可选的 `database/demo-data.sql`，不由应用启动创建。真实本地配置位于 `backend/config/application-local.yml`，示例可提交，真实文件不提交、不打包；从 backend 工作目录读取外部配置。业务时区、业务缓存、CORS 和前端配置仍为规划项。
+演示账户来自可选的 `database/demo-data.sql`，不由应用启动创建。真实本地配置位于 `backend/config/application-local.yml`，示例可提交，真实文件不提交、不打包；从 backend 工作目录读取外部配置。业务时区已接入；业务缓存、CORS 和前端配置仍为规划项。
 
 配置由运行环境注入，命令行和 IDEA 配置方式见 [README](README.md)。仓库只提供不含真实凭证的配置示例。
 
