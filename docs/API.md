@@ -1,6 +1,6 @@
 # REST API 设计
 
-实现范围：认证、Habit 创建/去重/分页、打卡提交、今日状态和连续天数已实现，第 2–7 节描述当前行为；第 8 节区分已实现的前端认证与后续 Habit 消费约定。阶段 1–8 的真实 MySQL/Redis 接口验收已于 2026-09-20 完成，测试状态见 [测试计划](TEST_PLAN.md)。
+实现范围：认证、Habit 创建/去重/分页、打卡提交、今日状态和连续天数已实现，第 2–7 节描述当前行为；第 8 节区分已实现的前端认证、Habit 列表/创建与后续打卡消费约定。阶段 1–8 的真实 MySQL/Redis 接口验收已于 2026-09-20 完成，测试状态见 [测试计划](TEST_PLAN.md)。
 
 ## 1. 公共约定
 
@@ -296,7 +296,7 @@ HTTP 200，当前响应只包含 streak：
 
 统一请求层为 src/api/request.js，使用 uni.request，基础地址 http://localhost:8080/api/v1，超时 10 秒。仅 HTTP 2xx 且 body.code === 0 时返回 body.data；其他失败拒绝为 {status, code, message}，网络失败为 status=0、code=null。禁止根据 message 判断业务。
 
-Token 仅取登录响应 data.token，通过 src/utils/auth.js 统一存入 checkin.auth.token，每次请求重新读取并注入 Bearer。登录页校验非空、提交中禁止重复提交，成功后进入 habits 验证页。验证页调用 /auth/me 显示 username，401 返回登录页；退出请求成功或失败均清 Token 并返回登录页。该页面不提供 Habit 业务。
+Token 仅取登录响应 data.token，通过 src/utils/auth.js 统一存入 checkin.auth.token，每次请求重新读取并注入 Bearer。登录页校验非空、提交中禁止重复提交，成功后进入 habits 主页。主页调用 /auth/me 显示 username，401 返回登录页；退出请求成功或失败均清 Token 并返回登录页。该页面已提供 Habit 列表和创建功能，见第 8.2 节。
 
 前端统一请求层集中处理：
 
@@ -307,7 +307,15 @@ Token 仅取登录响应 data.token，通过 src/utils/auth.js 统一存入 chec
 - 401 清理本地 Token 并引导重新登录。
 - 503 保留登录信息并提示稍后重试，不错误地当成“退出登录”。
 
-### 8.2 后续 Habit 前端消费约定（未实现）
+### 8.2 已实现：Habit 分页与创建
+
+src/api/habit.js 中 getHabits({page=1, pageSize=20}) 调用 GET /habits，createHabit(data) 调用 POST /habits；均复用 request.js。查询响应 data 为 {items, total, page, pageSize}，每条 Habit 包含 id、name、description、createdAt、updatedAt。id 保持十进制字符串，直接使用 habit.id 作为列表 key，不使用 Number 或 parseInt。
+
+主页展示 name 及非空 description，支持上一页/下一页；请求成功后才切换展示页码，失败可重试原目标页。第一页/末页及请求中禁用相应翻页按钮，空列表与错误状态分开显示。
+
+创建仅提交 name、description，HTTP 201/code=0 后清空并关闭表单、重新查询第一页。名称与描述按码点校验长度，不通过控件 UTF-16 maxlength 截断 emoji；描述保留原文，后端统一处理空白转 NULL。重复名称基于 code===40901 提示，不匹配 message。401 返回登录页；其他失败保留表单以便重试。创建成功后的列表刷新若失败，显示列表错误和重试入口，不伪造记录。
+
+### 8.3 后续打卡前端消费约定（未实现）
 
 打卡按钮提交中可禁用以改善体验，但并发正确性不能依赖前端按钮状态。
 

@@ -9,7 +9,7 @@
     {
       "path": "pages/habits/habits",
       "style": {
-        "navigationBarTitleText": "登录验证"
+        "navigationBarTitleText": "我的习惯"
       }
     }
   ],
