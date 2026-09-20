@@ -2,7 +2,7 @@
 
 ## 1. 设计状态与依据
 
-本文件同时说明当前实现和后续设计。阶段 1–8 的开发及真实验收均已完成（2026-09-20），涵盖后端基础、认证、Habit 管理、打卡、连续天数和 Redis 业务缓存；Phase 9 第一阶段的前端登录闭环、真实联调及 CORS 验证已完成；Habit 列表与创建已完成真实联调；今日状态、打卡和连续天数前端已实现，第三阶段浏览器验收与最终交付仍待完成。开发应遵循根目录 `AGENTS.md` 及相关文档。
+本文件同时说明当前实现和后续设计。阶段 1–8 的开发及真实验收均已完成（2026-09-20），涵盖后端基础、认证、Habit 管理、打卡、连续天数和 Redis 业务缓存；Phase 9 第一阶段的前端登录闭环、真实联调及 CORS 验证已完成；Habit 列表与创建已完成真实联调；今日状态、打卡和连续天数前端已实现，第三阶段真实浏览器验收已完成；最终交付按后续计划推进。开发应遵循根目录 `AGENTS.md` 及相关文档。
 
 后端使用 Java 21 + Spring Boot；前端使用 UniApp + Vue 3，并以 H5 作为演示目标。
 
@@ -147,10 +147,16 @@ MySQL 是最终业务数据来源；Redis 只承担服务端登录态和查询�
 
 习惯主页保留 /auth/me 和退出登录，通过 src/api/habit.js → request.js → uni.request 调用 GET/POST /habits。列表状态、分页与创建表单使用 Vue ref 管理，不引入状态管理库。分页只使用后端 items/total/page/pageSize；Habit ID 保持字符串。创建成功重新查询第一页，不做乐观插入；重名按 code=40901 处理，401 沿用清 Token 与返回登录页流程。
 
-Vite 开发端口固定为 5173，strictPort=true，避免自动换端口导致 Origin 与后端 CORS 不匹配。列表、分页、创建及重名提示已完成真实联调；今日状态、打卡和 streak 前端已实现，第三阶段浏览器验收仍待完成。
+Vite 开发端口固定为 5173，strictPort=true，避免自动换端口导致 Origin 与后端 CORS 不匹配。列表、分页、创建及重名提示已完成真实联调；今日状态、打卡和 streak 前端已实现，第三阶段真实浏览器验收已完成。
 
 ## 10. 今日状态、打卡与连续天数前端（已实现）
 
 习惯主页通过 habit.js 的 getTodayStatus、checkinToday、getStreak 复用统一 request 层。列表成功后为每条字符串 Habit ID 建立独立状态，today 与 streak 分别维护值、loading 和 error；不增加后端聚合接口。页版本与卡片查询版本用于忽略过期响应，退出页面后停止更新。
 
-PUT 返回 created=true/false 均触发两个 GET 重新同步，页面只展示服务器状态；同步失败保留卡片和操作提示，不用旧值伪装最新结果。按钮防重复点击仅改善体验，幂等仍由后端和数据库唯一约束保障。未引入 Pinia、Axios、自动化前端测试集或新后端逻辑。
+PUT 返回 created=true/false 均触发两个 GET 重新同步，页面只展示服务器状态；同步失败保留卡片和操作提示，不用旧值伪装最新结果。按钮防重复点击仅改善体验，幂等仍由后端和数据库唯一约束保障。未引入 Pinia、Axios 或新后端逻辑；收尾阶段已新增独立 Vitest 纯 JS 测试。
+
+## 11. 前端收尾与轻量测试
+
+Node.js 24.19.0 / npm 11.17.0；Vitest 与现有 Vite 5 兼容，独立 vitest.config.mjs 仅运行 tests 下的 Node 环境测试，不加载 UniApp 插件。测试以 globalThis.uni 替身覆盖 auth 存储、request 协议判断与 API 路径参数，不访问真实服务。保留 frontend/shims-uni.d.ts，移除重复的 src/shime-uni.d.ts。
+
+refreshCheckin 仅在当前页、当前轮 today/streak 均同步成功后清除陈旧 actionError；部分失败或旧请求不能清除提示。真实浏览器已验收 today/streak、首次及重复 PUT、写后同步、刷新持久化、分页 ID 对应与 logout。

@@ -4,7 +4,7 @@
 
 ## 当前进度
 
-阶段 1–8 的开发及真实验收均已完成（2026-09-20），覆盖项目骨架、MySQL 持久层、统一响应、登录与登出、Redis Session、Habit 创建/去重/分页、每日打卡与并发安全、今日状态、连续天数及 Redis 业务缓存。Phase 9 第一阶段的前端登录闭环及 H5 与 Spring Boot 真实联调已完成，CORS 预检已配置并验证。Habit 列表、创建及重名处理已完成真实联调；第三阶段今日状态、打卡及连续天数展示已实现，打卡完整链路验收与最终交付仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续开展。当前接口契约见 [API 文档](docs/API.md)。
+阶段 1–8 的开发及真实验收均已完成（2026-09-20），覆盖项目骨架、MySQL 持久层、统一响应、登录与登出、Redis Session、Habit 创建/去重/分页、每日打卡与并发安全、今日状态、连续天数及 Redis 业务缓存。Phase 9 第一阶段的前端登录闭环及 H5 与 Spring Boot 真实联调已完成，CORS 预检已配置并验证。Habit 列表、创建及重名处理已完成真实联调；第三阶段今日状态、打卡及连续天数展示已实现，打卡完整链路人工验收已通过，最终交付仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续开展。当前接口契约见 [API 文档](docs/API.md)。
 
 ## 后端环境与启动
 
@@ -154,7 +154,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 
 2026-09-20，Java 21.0.12.1 / Maven 3.9.11 执行 clean verify：219 项普通测试全部通过，0 失败、0 错误、0 跳过，打包成功。其中包含 5 项 CORS Contract 测试；自动化缓存测试使用 Redis 替身，本次未执行 mysql-it；另于 2026-09-20 阶段 1–8 的全部真实验收完成，包括真实 Memurai 的 TTL、Key 内容、写后失效和自然过期。本次文档同步未重跑测试，自动化测试记录保持不变。
 
-真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。该 Service 测试与已完成的 HTTP + Redis 鉴权并发验收分别记录。阶段 1–8 的真实 MySQL/Redis 联调、会话到期、故障场景和 SQL 初始化验收已完成；H5 登录闭环与 CORS 已验证，Habit 列表与创建已完成真实联调，今日状态、打卡及连续天数前端已实现，第三阶段完整业务链路仍待验收。
+真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。该 Service 测试与已完成的 HTTP + Redis 鉴权并发验收分别记录。阶段 1–8 的真实 MySQL/Redis 联调、会话到期、故障场景和 SQL 初始化验收已完成；H5 登录闭环与 CORS 已验证，Habit 列表与创建已完成真实联调，今日状态、打卡及连续天数前端已实现，第三阶段完整业务链路人工验收已通过。
 
 测试覆盖、报告位置和剩余验收项统一维护在 [测试计划](docs/TEST_PLAN.md) 第 9–10 节。
 
@@ -188,4 +188,12 @@ npm run dev:h5
 
 打卡调用 PUT /habits/{habitId}/checkins/today；created=true 提示本次成功，created=false 作为已打卡的幂等成功处理，两者随后均重新查询 today 与 streak。前端不判断业务日期、不执行 streak++，ID 全程保持字符串。请求中防重复点击，已打卡禁用按钮；401 返回登录页，40401 显示资源不可用提示。
 
-第三阶段 npm run build:h5 成功，npm run dev:h5 正常启动，入口及页面资源 HTTP 200。工具环境没有可用浏览器连接，且当时后端 8080 返回 ECONNREFUSED；第三阶段真实点击、重复 PUT、刷新与分页状态的浏览器验收尚未完成。本轮文档同步未重跑验证。
+第三阶段 npm run build:h5 成功，npm run dev:h5 正常启动，入口及页面资源 HTTP 200。工具环境没有可用浏览器连接，且当时后端 8080 返回 ECONNREFUSED；上述为历史工具检查限制；第三阶段真实点击、重复 PUT、写后同步、刷新持久化、分页状态与 logout 回归现已全部通过人工浏览器验收。
+
+## 前端自动化回归与开发环境
+
+当前开发环境：Node.js 24.19.0、npm 11.17.0。frontend 目录执行 npm test 运行 Vitest，npm run test:watch 进入监听模式，npm run build:h5 验证生产构建。测试通过 globalThis.uni 替身覆盖 Token 存储、请求封装及认证/Habit API 参数，不连接 Spring Boot、MySQL 或 Redis，不替代真实浏览器验收。
+
+收尾修复：today/streak 当前轮均成功同步后清除旧 actionError；任一查询失败仍保留错误，不改变幂等语义。删除重复的 src/shime-uni.d.ts，保留 frontend/shims-uni.d.ts；Vitest 使用独立配置，不改变 UniApp 编译配置。
+
+本轮前端验证：Vitest 4 个文件、36 项测试全部通过，npm run build:h5 构建成功。详细覆盖见 docs/TEST_PLAN.md 第 22 节；后端未修改，219 项后端测试保留历史记录。

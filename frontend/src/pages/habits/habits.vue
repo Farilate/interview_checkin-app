@@ -188,6 +188,11 @@ async function refreshCheckin(habitId, version = pageVersion) {
     }
   }
   await Promise.all([query('today', getTodayStatus, 'checkedIn'), query('streak', getStreak, 'streak')])
+  // 只有当前轮的两项查询均成功，才移除旧操作错误；部分失败和过期响应不得清除提示。
+  if (isCurrentCard(habitId, version) && state.refreshVersion === refreshVersion
+    && !state.todayError && !state.streakError) {
+    state.actionError = ''
+  }
 }
 
 async function submitCheckin(habitId) {
