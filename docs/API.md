@@ -1,6 +1,6 @@
 # REST API 设计
 
-实现范围：认证、Habit 创建/去重/分页、打卡提交、今日状态和连续天数已实现，第 2–7 节描述当前行为；第 8 节区分已实现的前端认证、Habit 列表/创建与后续打卡消费约定。阶段 1–8 的真实 MySQL/Redis 接口验收已于 2026-09-20 完成，测试状态见 [测试计划](TEST_PLAN.md)。
+实现范围：认证、Habit 创建/去重/分页、打卡提交、今日状态和连续天数已实现，第 2–7 节描述当前行为；第 8 节区分已实现的前端认证、Habit 列表/创建及打卡消费约定。阶段 1–8 的真实 MySQL/Redis 接口验收已于 2026-09-20 完成，测试状态见 [测试计划](TEST_PLAN.md)。
 
 ## 1. 公共约定
 
@@ -315,9 +315,13 @@ src/api/habit.js 中 getHabits({page=1, pageSize=20}) 调用 GET /habits，creat
 
 创建仅提交 name、description，HTTP 201/code=0 后清空并关闭表单、重新查询第一页。名称与描述按码点校验长度，不通过控件 UTF-16 maxlength 截断 emoji；描述保留原文，后端统一处理空白转 NULL。重复名称基于 code===40901 提示，不匹配 message。401 返回登录页；其他失败保留表单以便重试。创建成功后的列表刷新若失败，显示列表错误和重试入口，不伪造记录。
 
-### 8.3 后续打卡前端消费约定（未实现）
+### 8.3 已实现：今日状态、打卡与连续天数
 
-打卡按钮提交中可禁用以改善体验，但并发正确性不能依赖前端按钮状态。
+habit.js 新增 getTodayStatus(habitId)、checkinToday(habitId)、getStreak(habitId)，全部复用 request.js，ID 保持字符串。GET today 的 data 仅为 {checkedIn}，GET streak 的 data 仅为 {streak}；PUT 的 data 为 {id, habitId, checkinDate, checkedInAt, created}。
+
+每张卡片独立维护 today/streak 的值、加载和错误状态；单个查询失败不使列表消失。分页成功重新创建当前页状态，页版本及刷新版本阻止过期响应写回。40401 显示不存在或无权访问，401 沿用认证处理；不解析 message 判断业务。
+
+按钮在打卡请求及写后同步期间显示 loading 并防重复点击，已打卡时禁用。created=true 与 created=false 都视为成功，随后重新查询该 Habit 的两个 GET；不乐观修改 checkedIn、不递增 streak。网络失败时也尝试同步，以处理写入结果未知的情况。并发正确性仍由后端唯一约束保障。
 
 PUT /habits/{habitId}/checkins/today 成功后使用记录和 created 标记更新页面；created=false 可展示“今日已打卡”。刷新或页面重新激活时调用今日状态 GET 读取 checkedIn，调用连续天数 GET 读取 streak，不再读取旧字段名。
 

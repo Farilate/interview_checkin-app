@@ -37,6 +37,25 @@
       <view v-for="habit in habits" :key="habit.id" class="card">
         <text class="heading">{{ habit.name }}</text>
         <text v-if="habit.description" class="habit-description">{{ habit.description }}</text>
+        <view v-if="checkinStates[habit.id]" class="checkin-status">
+          <text v-if="checkinStates[habit.id].todayLoading" class="message">今日状态：加载中…</text>
+          <text v-else-if="checkinStates[habit.id].todayError" class="error" role="alert">今日状态：{{ checkinStates[habit.id].todayError }}</text>
+          <text v-else class="message">今日状态：{{ checkinStates[habit.id].checkedIn === true ? '已打卡' : '未打卡' }}</text>
+          <text v-if="checkinStates[habit.id].streakLoading" class="message">当前连续：加载中…</text>
+          <text v-else-if="checkinStates[habit.id].streakError" class="error" role="alert">当前连续：{{ checkinStates[habit.id].streakError }}</text>
+          <text v-else class="message">当前连续：{{ checkinStates[habit.id].streak }} 天</text>
+          <text v-if="checkinStates[habit.id].actionError" class="error" role="alert">{{ checkinStates[habit.id].actionError }}</text>
+          <text v-if="checkinStates[habit.id].notice" class="message" role="status">{{ checkinStates[habit.id].notice }}</text>
+          <button type="primary"
+            :loading="checkinStates[habit.id].checking"
+            :disabled="leaving || checkinStates[habit.id].checking || checkinStates[habit.id].todayLoading || checkinStates[habit.id].checkedIn !== false || checkinStates[habit.id].unavailable"
+            @click="submitCheckin(habit.id)">
+            {{ checkinStates[habit.id].checking ? '打卡并同步中…' : checkinStates[habit.id].checkedIn === true ? '今日已打卡' : '立即打卡' }}
+          </button>
+          <button v-if="checkinStates[habit.id].todayError || checkinStates[habit.id].streakError || checkinStates[habit.id].actionError"
+            :disabled="leaving || checkinStates[habit.id].checking || checkinStates[habit.id].todayLoading || checkinStates[habit.id].streakLoading"
+            @click="refreshCheckin(habit.id)">重新同步状态</button>
+        </view>
       </view>
     </template>
     <view v-if="listReady" class="pagination">
@@ -53,7 +72,7 @@
 import { ref } from 'vue'
 import { onShow, onUnload } from '@dcloudio/uni-app'
 import { getCurrentUser, logout } from '../../api/auth'
-import { getHabits, createHabit } from '../../api/habit'
+import { getHabits, createHabit, getTodayStatus, checkinToday, getStreak } from '../../api/habit'
 import { clearToken } from '../../utils/auth'
 
 const username = ref('')
@@ -62,6 +81,9 @@ const userError = ref('')
 const loggingOut = ref(false)
 const leaving = ref(false)
 const habits = ref([])
+// 每页重新建立以字符串 ID 为键的状态；页版本阻止旧页异步响应覆盖新页。
+const checkinStates = ref({})
+let pageVersion = 0
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -107,6 +129,7 @@ async function loadHabits(targetPage = 1) {
   listLoading.value = true
   listError.value = ''
   requestedPage.value = targetPage
+  const version = ++pageVersion
   try {
     const data = await getHabits({ page: targetPage, pageSize: pageSize.value })
     if (leaving.value) return
@@ -116,10 +139,83 @@ async function loadHabits(targetPage = 1) {
     page.value = data.page
     pageSize.value = data.pageSize
     listReady.value = true
+    checkinStates.value = Object.fromEntries(data.items.map(habit => [habit.id, {
+      checkedIn: null, streak: null, todayLoading: true, streakLoading: true,
+      todayError: '', streakError: '', checking: false, actionError: '', notice: '', unavailable: false,
+      refreshVersion: 0,
+    }]))
+    // 每个 Habit 的两个查询独立处理失败，不让单项故障影响列表或其他卡片。
+    for (const habit of data.items) refreshCheckin(habit.id, version)
   } catch (error) {
     if (!leaving.value && !handleUnauthorized(error)) listError.value = error.message || '加载习惯失败'
   } finally {
     listLoading.value = false
+  }
+}
+
+function isCurrentCard(habitId, version) {
+  return !leaving.value && version === pageVersion && !!checkinStates.value[habitId]
+}
+
+function cardError(error) {
+  return error.code === 40401 ? '习惯不存在或无权访问，请刷新列表' : (error.message || '请求失败，请重试')
+}
+
+async function refreshCheckin(habitId, version = pageVersion) {
+  if (!isCurrentCard(habitId, version)) return
+  const state = checkinStates.value[habitId]
+  const refreshVersion = ++state.refreshVersion
+  state.unavailable = false
+  // 开始查询就清除旧值，刷新失败时不能把旧状态当作最新结果。
+  state.checkedIn = null
+  state.streak = null
+  async function query(kind, fetchData, field) {
+    state[kind + 'Loading'] = true
+    state[kind + 'Error'] = ''
+    try {
+      const data = await fetchData(habitId)
+      if (isCurrentCard(habitId, version) && state.refreshVersion === refreshVersion) state[field] = data[field]
+    } catch (error) {
+      if (leaving.value) return
+      // 401 始终沿用统一认证处理；旧页普通错误不污染新页。
+      if (handleUnauthorized(error)) return
+      if (isCurrentCard(habitId, version) && state.refreshVersion === refreshVersion) {
+        state[kind + 'Error'] = cardError(error)
+        if (error.code === 40401) state.unavailable = true
+      }
+    } finally {
+      if (isCurrentCard(habitId, version) && state.refreshVersion === refreshVersion) state[kind + 'Loading'] = false
+    }
+  }
+  await Promise.all([query('today', getTodayStatus, 'checkedIn'), query('streak', getStreak, 'streak')])
+}
+
+async function submitCheckin(habitId) {
+  const version = pageVersion
+  if (!isCurrentCard(habitId, version)) return
+  const state = checkinStates.value[habitId]
+  if (state.checking || state.todayLoading || state.checkedIn !== false || state.unavailable) return
+  state.checking = true
+  state.actionError = ''
+  state.notice = ''
+  // 作废打卡前仍在途的查询，避免旧 streak 覆盖写后查询结果。
+  ++state.refreshVersion
+  try {
+    const result = await checkinToday(habitId)
+    if (!isCurrentCard(habitId, version)) return
+    if (result.created === true) state.notice = '本次打卡成功'
+    else if (result.created === false) state.notice = '今日已打过卡，正在同步最新状态'
+    // 两种幂等成功均重新读取服务器状态，不自行设置 today 或增加 streak。
+    await refreshCheckin(habitId, version)
+  } catch (error) {
+    if (!leaving.value && !handleUnauthorized(error) && isCurrentCard(habitId, version)) {
+      state.actionError = cardError(error)
+      if (error.code === 40401) state.unavailable = true
+      // 网络失败时写入结果可能未知，重新读取状态后再决定是否允许重试。
+      await refreshCheckin(habitId, version)
+    }
+  } finally {
+    if (isCurrentCard(habitId, version)) state.checking = false
   }
 }
 

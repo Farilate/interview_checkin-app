@@ -4,7 +4,7 @@
 
 ## 当前进度
 
-阶段 1–8 的开发及真实验收均已完成（2026-09-20），覆盖项目骨架、MySQL 持久层、统一响应、登录与登出、Redis Session、Habit 创建/去重/分页、每日打卡与并发安全、今日状态、连续天数及 Redis 业务缓存。Phase 9 第一阶段的前端登录闭环及 H5 与 Spring Boot 真实联调已完成，CORS 预检已配置并验证。Habit 列表与创建前端已实现；真实 Habit 联调、后续打卡页面与最终交付仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续开展。当前接口契约见 [API 文档](docs/API.md)。
+阶段 1–8 的开发及真实验收均已完成（2026-09-20），覆盖项目骨架、MySQL 持久层、统一响应、登录与登出、Redis Session、Habit 创建/去重/分页、每日打卡与并发安全、今日状态、连续天数及 Redis 业务缓存。Phase 9 第一阶段的前端登录闭环及 H5 与 Spring Boot 真实联调已完成，CORS 预检已配置并验证。Habit 列表、创建及重名处理已完成真实联调；第三阶段今日状态、打卡及连续天数展示已实现，打卡完整链路验收与最终交付仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续开展。当前接口契约见 [API 文档](docs/API.md)。
 
 ## 后端环境与启动
 
@@ -154,7 +154,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 
 2026-09-20，Java 21.0.12.1 / Maven 3.9.11 执行 clean verify：219 项普通测试全部通过，0 失败、0 错误、0 跳过，打包成功。其中包含 5 项 CORS Contract 测试；自动化缓存测试使用 Redis 替身，本次未执行 mysql-it；另于 2026-09-20 阶段 1–8 的全部真实验收完成，包括真实 Memurai 的 TTL、Key 内容、写后失效和自然过期。本次文档同步未重跑测试，自动化测试记录保持不变。
 
-真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。该 Service 测试与已完成的 HTTP + Redis 鉴权并发验收分别记录。阶段 1–8 的真实 MySQL/Redis 联调、会话到期、故障场景和 SQL 初始化验收已完成；H5 登录闭环与 CORS 已验证，Habit 列表与创建前端已实现，真实联调和完整业务链路仍待验收。
+真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。该 Service 测试与已完成的 HTTP + Redis 鉴权并发验收分别记录。阶段 1–8 的真实 MySQL/Redis 联调、会话到期、故障场景和 SQL 初始化验收已完成；H5 登录闭环与 CORS 已验证，Habit 列表与创建已完成真实联调，今日状态、打卡及连续天数前端已实现，第三阶段完整业务链路仍待验收。
 
 测试覆盖、报告位置和剩余验收项统一维护在 [测试计划](docs/TEST_PLAN.md) 第 9–10 节。
 
@@ -172,7 +172,7 @@ npm run dev:h5
 
 登录调用 POST /auth/login，保存响应 data.token 后跳转 pages/habits/habits；该页调用 GET /auth/me 显示用户名，并提供 Habit 分页列表和创建表单。退出调用 POST /auth/logout，无论请求成功或失败均清除本地 Token 并返回登录页。所有接口使用 uni.request；每次请求读取本地 Token 并注入 Bearer，HTTP 401 清 Token，/auth/me 的 401 由页面导航回登录。未使用 Mock、axios、Pinia 或大型 UI 库。
 
-生产构建执行 `npm run build:h5`，输出位于 frontend/dist/build/h5。H5 构建与真实认证联调已完成；Habit 列表、分页、创建及重名提示已实现；真实 Habit 联调尚未完成，今日状态、打卡和 streak 前端尚未开发。
+生产构建执行 `npm run build:h5`，输出位于 frontend/dist/build/h5。H5 构建与真实认证联调已完成；Habit 列表、分页、创建及重名提示已实现；Habit 列表与创建真实联调已完成，今日状态、打卡和 streak 前端已实现；第三阶段浏览器验收见测试计划第 21 节。
 
 ### Habit 列表与创建
 
@@ -180,4 +180,12 @@ npm run dev:h5
 
 创建只提交 name、description：名称必填且最多 50 个 Unicode 码点，描述最多 200 个码点，空白描述的 NULL 归一由后端处理。成功后清空并关闭表单，重新请求第一页；不伪造 ID 或乐观插入记录。code=40901 显示同名提示；401 返回登录页，退出仍清除本地令牌。
 
-第二阶段 H5 构建、开发服务器和页面资源检查通过。最近真实联调尝试因后端 8080 连接被拒绝（ECONNREFUSED）中止，未创建测试数据；浏览器创建、重名、刷新持久化和退出回归仍待验收，详见测试计划第 20 节。
+第二阶段 H5 构建、开发服务器和页面资源检查通过。早期工具联调曾因后端 8080 连接被拒绝（ECONNREFUSED）中止；随后 Habit 分页列表、创建及 40901 重名处理已完成真实联调。历史检查范围见测试计划第 20 节。
+
+### 今日打卡与连续天数
+
+当前页每张 Habit 卡片独立查询 GET /habits/{habitId}/checkins/today 和 GET /habits/{habitId}/streak，分别展示 checkedIn 和 streak。每项查询都有独立加载和错误状态，失败不清空 Habit 列表，可重新同步。分页成功后重新建立当前页状态，旧页响应不会覆盖新页。
+
+打卡调用 PUT /habits/{habitId}/checkins/today；created=true 提示本次成功，created=false 作为已打卡的幂等成功处理，两者随后均重新查询 today 与 streak。前端不判断业务日期、不执行 streak++，ID 全程保持字符串。请求中防重复点击，已打卡禁用按钮；401 返回登录页，40401 显示资源不可用提示。
+
+第三阶段 npm run build:h5 成功，npm run dev:h5 正常启动，入口及页面资源 HTTP 200。工具环境没有可用浏览器连接，且当时后端 8080 返回 ECONNREFUSED；第三阶段真实点击、重复 PUT、刷新与分页状态的浏览器验收尚未完成。本轮文档同步未重跑验证。

@@ -9,3 +9,16 @@ export function getHabits({ page = 1, pageSize = 20 } = {}) {
 export function createHabit(data) {
   return request({ url: '/habits', method: 'POST', data })
 }
+
+// ID 直接按字符串构造路径，不转换为 JavaScript Number。
+export function getTodayStatus(habitId) {
+  return request({ url: '/habits/' + encodeURIComponent(habitId) + '/checkins/today' })
+}
+
+export function checkinToday(habitId) {
+  return request({ url: '/habits/' + encodeURIComponent(habitId) + '/checkins/today', method: 'PUT' })
+}
+
+export function getStreak(habitId) {
+  return request({ url: '/habits/' + encodeURIComponent(habitId) + '/streak' })
+}
