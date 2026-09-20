@@ -33,6 +33,11 @@ spring:
 app:
   session:
     ttl-seconds: ${SESSION_TTL_SECONDS:7200}
+
+  # today / streak 业务缓存默认 10 分钟。
+  cache:
+    ttl-seconds: ${APP_CACHE_TTL_SECONDS:600}
+
   # 已实现的打卡、今日状态及连续天数统一使用该业务时区。
   business-zone: ${APP_BUSINESS_ZONE:Asia/Shanghai}
 

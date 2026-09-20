@@ -1,25 +1,62 @@
 package com.example.checkin.redis;
 
+import java.time.LocalDate;
+
 /**
  * Redis Key 统一管理。
  */
 public final class RedisKeys {
 
-    /** 应用及键结构版本前缀，避免与其他业务键混用。 */
+    /** 应用及键结构版本前缀。 */
     private static final String ROOT = "checkin:v1:";
-    /** 登录会话命名空间，值为用户 ID 字符串。 */
+
+    /** 登录会话命名空间。 */
     private static final String SESSION_PREFIX = ROOT + "session:";
 
-    /** 工具类只提供静态方法，不允许创建实例。 */
+    /** 今日打卡状态缓存命名空间。 */
+    private static final String TODAY_PREFIX = ROOT + "today:";
+
+    /** 当前连续打卡天数缓存命名空间。 */
+    private static final String STREAK_PREFIX = ROOT + "streak:";
+
     private RedisKeys() {
     }
 
-    /**
-     * 构造会话键，本方法不计算摘要，也不访问 Redis。
-     * @param tokenHash 原始令牌的 SHA-256 十六进制摘要，不能传入原始令牌
-     * @return 带应用前缀的完整 Redis 会话键
-     */
     public static String session(String tokenHash) {
         return SESSION_PREFIX + tokenHash;
+    }
+
+    /**
+     * 今日打卡状态缓存 Key。
+     *
+     * 格式：
+     * checkin:v1:today:{uid}:{hid}:{yyyy-MM-dd}
+     */
+    public static String today(
+            long userId,
+            long habitId,
+            LocalDate businessDate) {
+
+        return TODAY_PREFIX
+                + userId + ":"
+                + habitId + ":"
+                + businessDate;
+    }
+
+    /**
+     * 当前连续打卡天数缓存 Key。
+     *
+     * 格式：
+     * checkin:v1:streak:{uid}:{hid}:{yyyy-MM-dd}
+     */
+    public static String streak(
+            long userId,
+            long habitId,
+            LocalDate businessDate) {
+
+        return STREAK_PREFIX
+                + userId + ":"
+                + habitId + ":"
+                + businessDate;
     }
 }

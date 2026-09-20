@@ -5,6 +5,7 @@ import com.example.checkin.mapper.HabitMapper;
 import com.example.checkin.model.CheckinRecord;
 import com.example.checkin.model.Habit;
 import com.example.checkin.service.impl.CheckinRecordServiceImpl;
+import com.example.checkin.service.CheckinCacheService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -30,7 +31,16 @@ class CheckinRecordServiceTest {
     private final CheckinRecordMapper records = mock(CheckinRecordMapper.class);
     private final HabitMapper habits = mock(HabitMapper.class);
     private final Clock clock = mock(Clock.class);
-    private final CheckinRecordServiceImpl service = new CheckinRecordServiceImpl(records, habits, clock);
+    private final CheckinCacheService cache =
+            mock(CheckinCacheService.class);
+
+    private final CheckinRecordServiceImpl service =
+            new CheckinRecordServiceImpl(
+                    records,
+                    habits,
+                    clock,
+                    cache
+            );
     private static final LocalDate DATE = LocalDate.of(2026, 9, 19);
 
     /** 第一瞬间位于上海午夜前，若错误地再次取时则会读到下一天。 */
@@ -40,6 +50,153 @@ class CheckinRecordServiceTest {
         when(clock.getZone()).thenReturn(ZoneId.of("Asia/Shanghai"));
         when(clock.instant()).thenReturn(Instant.parse("2026-09-19T15:59:59.999999999Z"),
                 Instant.parse("2026-09-19T16:00:00Z"));
+        when(cache.getToday(
+                anyLong(),
+                anyLong(),
+                any(LocalDate.class)
+        )).thenReturn(null);
+
+        when(cache.getStreak(
+                anyLong(),
+                anyLong(),
+                any(LocalDate.class)
+        )).thenReturn(null);
+    }
+
+    /**
+     * 并发打卡时，如果本次 INSERT 因唯一键冲突失败，
+     * 但随后能够回查到已经成功写入的赢家记录，
+     * 也必须删除当天的 today / streak 业务缓存。
+     */
+    @Test
+    void duplicateCheckInWinnerEvictsBusinessCache() {
+
+        CheckinRecord winner = new CheckinRecord();
+        winner.setId(501L);
+        winner.setUserId(7L);
+        winner.setHabitId(101L);
+        winner.setCheckinDate(DATE);
+        winner.setCheckedInAt(
+                LocalDateTime.of(2026, 9, 20, 1, 2, 3)
+        );
+
+        /*
+         * 第一次查询发生在 INSERT 前，此时还没有记录。
+         * 第二次查询发生在 DuplicateKeyException 后，
+         * 此时模拟另一个并发请求已经写入成功。
+         */
+        when(records.findByUserHabitAndDate(
+                7L,
+                101L,
+                DATE
+        )).thenReturn(null, winner);
+
+        // 模拟本请求 INSERT 时撞上唯一键约束。
+        when(records.insert(any()))
+                .thenThrow(new DuplicateKeyException("duplicate"));
+
+        var result = service.checkIn(7L, 101L);
+
+        // 当前请求没有创建新记录，而是返回并发赢家的记录。
+        assertFalse(result.isCreated());
+
+        // 即使走的是并发冲突恢复分支，也必须清理当天业务缓存。
+        verify(cache).evict(
+                7L,
+                101L,
+                DATE
+        );
+    }
+
+    /**
+     * 首次打卡成功写入 MySQL 后，
+     * 必须删除当天的 today / streak 业务缓存。
+     */
+    @Test
+    void successfulCheckInEvictsBusinessCache() {
+
+        // 模拟数据库插入成功，并回填主键。
+        when(records.insert(any())).thenAnswer(call -> {
+            CheckinRecord record = call.getArgument(0);
+            record.setId(501L);
+            return 1;
+        });
+
+        // 执行首次打卡。
+        var result = service.checkIn(7L, 101L);
+
+        // 确认本次确实是新建记录。
+        assertTrue(result.isCreated());
+
+        // MySQL 写入成功后，必须使当天业务缓存失效。
+        verify(cache).evict(
+                7L,
+                101L,
+                DATE
+        );
+    }
+
+    /** streak 缓存命中时，不再查询打卡记录表。 */
+    @Test
+    void streakCacheHitSkipsDatabaseQuery() {
+        when(cache.getStreak(7L, 101L, DATE)).thenReturn(5);
+
+        assertEquals(5, service.getCurrentStreak(7L, 101L));
+
+        verify(cache).getStreak(7L, 101L, DATE);
+        verify(records, never())
+                .findDatesThrough(7L, 101L, DATE);
+        verify(cache, never())
+                .putStreak(anyLong(), anyLong(), any(), anyInt());
+    }
+
+    /** streak 缓存未命中时查询 MySQL、计算连续天数并回填缓存。 */
+    @Test
+    void streakCacheMissQueriesDatabaseAndBackfillsCache() {
+        when(cache.getStreak(7L, 101L, DATE)).thenReturn(null);
+
+        when(records.findDatesThrough(7L, 101L, DATE))
+                .thenReturn(List.of(
+                        DATE,
+                        DATE.minusDays(1),
+                        DATE.minusDays(2)
+                ));
+
+        assertEquals(3, service.getCurrentStreak(7L, 101L));
+
+        verify(cache).getStreak(7L, 101L, DATE);
+        verify(records).findDatesThrough(7L, 101L, DATE);
+        verify(cache).putStreak(7L, 101L, DATE, 3);
+    }
+
+    /** today 缓存命中时，不再查询打卡记录表。 */
+    @Test
+    void todayCacheHitSkipsDatabaseQuery() {
+        when(cache.getToday(7L, 101L, DATE)).thenReturn(true);
+
+        assertTrue(service.hasCheckedInToday(7L, 101L));
+
+        verify(cache).getToday(7L, 101L, DATE);
+        verify(records, never())
+                .findByUserHabitAndDate(7L, 101L, DATE);
+        verify(cache, never())
+                .putToday(anyLong(), anyLong(), any(), anyBoolean());
+    }
+
+    /** today 缓存未命中时查询 MySQL，并将结果回填 Redis。 */
+    @Test
+    void todayCacheMissQueriesDatabaseAndBackfillsCache() {
+        when(cache.getToday(7L, 101L, DATE)).thenReturn(null);
+        when(records.findByUserHabitAndDate(7L, 101L, DATE))
+                .thenReturn(new CheckinRecord());
+
+        assertTrue(service.hasCheckedInToday(7L, 101L));
+
+        verify(cache).getToday(7L, 101L, DATE);
+        verify(records)
+                .findByUserHabitAndDate(7L, 101L, DATE);
+        verify(cache)
+                .putToday(7L, 101L, DATE, true);
     }
 
     /** 插入和响应必须使用午夜前的同一瞬间，且实际只调用一次 instant()。 */
