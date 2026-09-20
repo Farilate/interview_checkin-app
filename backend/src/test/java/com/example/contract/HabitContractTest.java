@@ -592,6 +592,51 @@ class HabitContractTest {
         verifyNoInteractions(habits, records);
     }
 
+    /** false 与 0 均为缓存命中，仍先验证归属，但无需查询打卡记录。 */
+    @Test
+    void cachedNegativeResultsAvoidRecordQueries() throws Exception {
+        allowCheckin();
+        LocalDate day = LocalDate.of(2026, 9, 20);
+        when(cache.getToday(7L, 101L, day)).thenReturn(false);
+        when(cache.getStreak(7L, 101L, day)).thenReturn(0);
+        assertFalse(check(send("GET", "/101/checkins/today", "owner", null), 200, 0)
+                .get("data").get("checkedIn").asBoolean());
+        assertEquals(0, check(send("GET", "/101/streak", "owner", null), 200, 0)
+                .get("data").get("streak").asInt());
+        verifyNoInteractions(records);
+        verify(habits, times(2)).findByUserIdAndId(7L, 101L);
+    }
+
+    /** 已有缓存也不能绕过习惯归属检查。 */
+    @Test
+    void ownershipIsCheckedBeforeCacheAccess() throws Exception {
+        check(send("GET", "/101/checkins/today", "other", null), 404, 40401);
+        check(send("GET", "/101/streak", "other", null), 404, 40401);
+        verifyNoInteractions(cache, records);
+    }
+
+    /** 缓存 Miss 时返回 MySQL 结果并回填，包括 false 和 0。 */
+    @Test
+    void missesPopulateBothNegativeCaches() throws Exception {
+        allowCheckin();
+        LocalDate day = LocalDate.of(2026, 9, 20);
+        check(send("GET", "/101/checkins/today", "owner", null), 200, 0);
+        check(send("GET", "/101/streak", "owner", null), 200, 0);
+        verify(cache).putToday(7L, 101L, day, false);
+        verify(cache).putStreak(7L, 101L, day, 0);
+    }
+
+    /** 首次成功与顺序重复均主动失效本日两个查询缓存。 */
+    @Test
+    void successfulAndRepeatedCheckinEvictCache() throws Exception {
+        allowCheckin();
+        LocalDate day = LocalDate.of(2026, 9, 20);
+        check(send("PUT", "/101/checkins/today", "owner", null), 200, 0);
+        when(records.findByUserHabitAndDate(7L, 101L, day)).thenReturn(storedCheckin());
+        check(send("PUT", "/101/checkins/today", "owner", null), 200, 0);
+        verify(cache, times(2)).evict(7L, 101L, day);
+    }
+
     /** 构造当前用户拥有的习惯，并模拟数据库主键回填。 */
     private void allowCheckin() {
         when(habits.findByUserIdAndId(7L, 101L)).thenReturn(new Habit());

@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 
 import static org.mockito.Mockito.*;
 
@@ -45,10 +46,11 @@ class CheckinCacheServiceImplTest {
 
         LocalDate date = LocalDate.of(2026, 9, 20);
 
-        // 模拟 Redis 在删除 today 缓存时不可用。
+        // 模拟 Redis 批量删除两个缓存键时不可用。
         doThrow(new RedisConnectionFailureException("Redis unavailable"))
                 .when(redisTemplate)
-                .delete("checkin:v1:today:7:101:2026-09-20");
+                .delete(List.of("checkin:v1:today:7:101:2026-09-20",
+                        "checkin:v1:streak:7:101:2026-09-20"));
 
         // Redis 缓存删除失败不能传播到业务层。
         assertDoesNotThrow(() ->
@@ -78,13 +80,9 @@ class CheckinCacheServiceImplTest {
 
         service.evict(7L, 101L, date);
 
-        verify(redisTemplate).delete(
-                "checkin:v1:today:7:101:2026-09-20"
-        );
-
-        verify(redisTemplate).delete(
-                "checkin:v1:streak:7:101:2026-09-20"
-        );
+        verify(redisTemplate).delete(List.of(
+                "checkin:v1:today:7:101:2026-09-20",
+                "checkin:v1:streak:7:101:2026-09-20"));
     }
 
     @Test

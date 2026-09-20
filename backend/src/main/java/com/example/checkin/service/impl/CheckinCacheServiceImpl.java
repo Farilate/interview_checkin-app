@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 
 /**
  * 打卡业务缓存实现。
@@ -34,8 +35,12 @@ public class CheckinCacheServiceImpl implements CheckinCacheService {
     public CheckinCacheServiceImpl(
             StringRedisTemplate redisTemplate,
             Clock businessClock,
-            @Value("${app.cache.ttl-seconds:600}") long ttlSeconds) {
+            @Value("${app.cache.ttl-seconds:30}") long ttlSeconds) {
 
+        // 非正数是配置错误，Bean 创建时立即失败，避免启动后静默禁用缓存。
+        if (ttlSeconds <= 0) {
+            throw new IllegalArgumentException("app.cache.ttl-seconds 必须为正数");
+        }
         this.redisTemplate = redisTemplate;
         this.businessClock = businessClock;
         this.configuredTtl = Duration.ofSeconds(ttlSeconds);
@@ -56,7 +61,11 @@ public class CheckinCacheServiceImpl implements CheckinCacheService {
                 return null;
             }
 
-            return "1".equals(value);
+            // false 是合法业务结果，不能用它代替损坏缓存的 Miss 语义。
+            if ("1".equals(value)) return true;
+            if ("0".equals(value)) return false;
+            log.warn("今日打卡缓存值非法，按 Miss 处理");
+            return null;
 
         } catch (DataAccessException e) {
             log.warn("读取今日打卡缓存失败，回退 MySQL");
@@ -73,7 +82,8 @@ public class CheckinCacheServiceImpl implements CheckinCacheService {
 
         Duration ttl = calculateTtl(businessDate);
 
-        if (ttl.isZero() || ttl.isNegative()) {
+        // 不依赖 Redis 驱动对亚毫秒时长的取整方式；不足 1ms 时不回填。
+        if (ttl.compareTo(Duration.ofMillis(1)) < 0) {
             return;
         }
 
@@ -103,7 +113,10 @@ public class CheckinCacheServiceImpl implements CheckinCacheService {
                 return null;
             }
 
-            return Integer.valueOf(value);
+            int streak = Integer.parseInt(value);
+            if (streak >= 0) return streak;
+            log.warn("连续打卡缓存值为负数，按 Miss 处理");
+            return null;
 
         } catch (DataAccessException | NumberFormatException e) {
             log.warn("读取连续打卡缓存失败，回退 MySQL");
@@ -118,9 +131,15 @@ public class CheckinCacheServiceImpl implements CheckinCacheService {
             LocalDate businessDate,
             int streak) {
 
+        // 拒绝非法内部结果进入缓存，但不让缓存校验破坏主业务响应。
+        if (streak < 0) {
+            log.warn("忽略负数连续打卡缓存写入");
+            return;
+        }
         Duration ttl = calculateTtl(businessDate);
 
-        if (ttl.isZero() || ttl.isNegative()) {
+        // 不依赖 Redis 驱动对亚毫秒时长的取整方式；不足 1ms 时不回填。
+        if (ttl.compareTo(Duration.ofMillis(1)) < 0) {
             return;
         }
 
@@ -142,13 +161,11 @@ public class CheckinCacheServiceImpl implements CheckinCacheService {
             LocalDate businessDate) {
 
         try {
-            redisTemplate.delete(
-                    RedisKeys.today(userId, habitId, businessDate)
-            );
-
-            redisTemplate.delete(
-                    RedisKeys.streak(userId, habitId, businessDate)
-            );
+            // 一次提交两个键，避免顺序删除时第一个失败而漏掉第二个。
+            // 整次删除失败仍依靠 TTL 收敛，不回滚已成功的 MySQL 写入。
+            redisTemplate.delete(List.of(
+                    RedisKeys.today(userId, habitId, businessDate),
+                    RedisKeys.streak(userId, habitId, businessDate)));
 
         } catch (DataAccessException e) {
             log.warn("删除打卡业务缓存失败，忽略缓存异常");

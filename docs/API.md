@@ -248,6 +248,8 @@ Response：HTTP 200。
 - 数据库连接故障：50302；其他未分类数据异常：50001。
 - 已存在同日记录：直接返回，不再次插入；插入发生 DuplicateKeyException 后按当前用户、习惯、日期回查，找到则返回原记录，查不到则继续抛出原异常，不能伪装成功。
 
+首次插入、顺序重复和唯一键冲突回查成功后，都会尝试删除当日 today/streak 两个键。当前无 Service 级事务，按现有无外层事务的调用方式先完成数据库操作再失效缓存；未实现事务提交后回调。
+
 **已修复与验收边界：**每次请求只读取一次 Clock.instant()，先截断到毫秒，再从同一 Instant 派生业务日期和 UTC 时间。重复键处理只根据目标三元组记录是否存在确认幂等结果，不解析消息、索引名称或 JDBC 错误号。此策略确认目标记录已存在，不推断原异常具体来自哪个索引。真实 MySQL 的 Service 层 10 线程并发已通过，HTTP + Redis 鉴权端到端并发尚未验收。
 
 ## 6. 查询今日打卡状态（已实现）
@@ -286,7 +288,7 @@ HTTP 200，当前响应只包含 streak：
 
 无记录返回 streak=0。字段名是 streak，当前不返回原设计的 streakDays、streakEndDate、asOfDate、habitId 或 businessZone。
 
-两个 GET 均设置 Cache-Control: no-store；缺少/失效令牌返回 40101，习惯不存在或属于他人返回 40401。0、负数、非数字或 long 溢出均返回 40001；合法正整数但资源不存在/无权访问仍返回 40401。数据库故障按统一分类返回错误，不能伪装为 false 或 0。当前查询直接访问 MySQL，尚未接入 Redis today/streak 缓存。
+两个 GET 均设置 Cache-Control: no-store；缺少/失效令牌返回 40101，习惯不存在或属于他人返回 40401。0、负数、非数字或 long 溢出均返回 40001；合法正整数但资源不存在/无权访问仍返回 40401。数据库故障按统一分类返回错误，不能伪装为 false 或 0。当前先查 MySQL 验证习惯归属，再读取 Redis today/streak 缓存；Miss 时查询打卡记录并回填，false 与 0 也是有效缓存值。
 
 ## 8. 前端消费约定
 
@@ -303,4 +305,6 @@ HTTP 200，当前响应只包含 streak：
 
 PUT /habits/{habitId}/checkins/today 成功后使用记录和 created 标记更新页面；created=false 可展示“今日已打卡”。刷新或页面重新激活时调用今日状态 GET 读取 checkedIn，调用连续天数 GET 读取 streak，不再读取旧字段名。
 
-两个 GET 当前直接读取 MySQL；后续 Phase 8 再接入 Redis 短 TTL 业务缓存。跨日或页面重新激活时应重新查询，连续天数由后端计算。
+两个 GET 已接入 Redis 业务缓存，TTL 默认 30 秒且受业务午夜限制，读取不续期。Redis 业务缓存读故障回源 MySQL，写入/删除故障记录固定警告并忽略；Redis Session 鉴权故障仍返回 50301。跨日或页面重新激活时应重新查询，连续天数由后端计算。
+
+缓存校验：today 仅接受 0/1，streak 仅接受非负整数；其他值按 Miss 回源。失效一次提交两个键，删除故障仍降级；TTL 必须为正数，实际 TTL 不足 1ms 时跳过回填。Cache-Aside 仍可能在极端并发下短暂回填旧值，通过默认 30 秒 TTL 收敛，不保证强一致。
