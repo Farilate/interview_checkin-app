@@ -74,12 +74,14 @@ PONG
 ```powershell
 cd backend
 
-$env:DB_URL = 'jdbc:mysql://localhost:3306/checkin?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true'
+$env:DB_URL = 'jdbc:mysql://<数据库地址>:<端口>/<数据库名>?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true'
 $env:DB_USERNAME = '你的MySQL用户名'
 $env:DB_PASSWORD = '你的MySQL密码'
 
 .\mvnw.cmd spring-boot:run
 ```
+> 例如：MySQL 在本机 3306，数据库名为 checkin  
+> $env:DB_URL = 'jdbc:mysql://localhost:3306/checkin?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true'
 
 看到类似：
 
