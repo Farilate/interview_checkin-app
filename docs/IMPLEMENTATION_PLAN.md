@@ -11,7 +11,7 @@
 | Phase 3：统一响应和异常处理 | 统一 DTO、参数校验、全局异常处理、HTTP/code 映射 | 合法与非法请求均符合 `API.md`；内部错误不泄露 SQL、凭证或堆栈 |
 | Phase 4：登录和 Redis 登录态 | BCrypt 验证；随机 Token；Redis Session；当前用户查询与上下文；登出；独立 SQL 准备演示账户 | 正确/错误密码、账户不存在、Session 过期均符合契约；Redis 中 Session 有真实 TTL；前端 userId 不能替代登录身份 |
 | Phase 5：打卡项管理 | 创建习惯、当前用户分页列表、名称校验及用户隔离 | 数据真实写入 MySQL；刷新后仍可查询；不同用户互相隔离；空列表正常 |
-| Phase 6：每日打卡和并发安全 | PUT /habits/{habitId}/checkins/today 与今日状态 GET 已实现；Clock、唯一键冲突回查 | 首次 created=true，重复 false；Service + MySQL 10 线程并发通过；HTTP 鉴权并发仍待验收 |
+| Phase 6：每日打卡和并发安全 | PUT /habits/{habitId}/checkins/today 与今日状态 GET 已实现；Clock、唯一键冲突回查 | 首次 created=true，重复 false；Service + MySQL 10 线程并发通过；HTTP 鉴权并发验收已完成 |
 | Phase 7：连续打卡算法 | 后端按 `LocalDate` 计算 streak；实现独立 streak GET 接口 | 验证今天/昨天锚点、断签、跨月、跨年；结果不使用总次数代替 |
 | Phase 8：Redis 业务缓存 | 接入 today/streak 短 TTL 缓存；Cache Miss 回源；打卡提交后删除相关缓存；业务缓存失败回退 MySQL | 第二次查询可命中缓存；手动删除 Key 后能回源；打卡后旧缓存被失效；缓存故障不影响已提交 MySQL 数据 |
 | Phase 9：UniApp 前端 | 创建 Vue 3 UniApp H5 工程；统一请求层、登录页、列表页、创建表单和打卡交互 | H5 构建成功；页面真实请求后端；处理 401、503、提交中、空列表和错误提示 |
@@ -20,7 +20,7 @@
 
 ## 2. 当前进度与已确认决策
 
-当前进度：阶段 1–3 已有实现；阶段 4 已新增 `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`、BCrypt、Redis 固定 TTL 会话及独立演示 SQL。阶段 4 已修复输入边界、登录响应字段、ID 字符串格式、Redis 故障分类及已删除用户会话清理，并新增认证回归测试。真实 MySQL/Redis 登录与登出联调仍待执行，因此尚未完成阶段验收。阶段 5 的 Habit 创建、名称去重和当前用户分页查询已实现，已补充 HTTP 回归；真实存储接口联调与并发创建验收仍待执行。阶段 6 的新 PUT 打卡路径、created 标记、今日状态 GET 已实现；阶段 7 连续天数 GET 及日期算法已实现。HTTP 回归、算法边界和真实 MySQL Service 并发通过，HTTP 鉴权端到端联调仍待验收。阶段 8 today/streak 缓存已接入查询、回填和打卡后失效，默认 TTL 为 30 秒；损坏值、批量删除、TTL 配置及亚毫秒边界已修复，用户已确认真实 Memurai 的 TTL、Key 内容、写后失效和自然过期验收通过；网络故障降级及并发旧值窗口的真实验收尚未确认。阶段 9–11 仍待按用户授权逐步实施，CORS 随 H5 联调处理。
+当前进度：阶段 1–8 的开发及真实验收均已完成（2026-09-20）。范围包括项目初始化、MySQL 建表与持久层、统一响应和异常处理、登录/当前用户/登出及 Redis Session、Habit 创建/去重/分页、每日打卡与 HTTP 鉴权并发安全、今日状态、连续天数与日期边界，以及 Redis 业务缓存的命中、回源、TTL、写后失效、自然过期和故障降级。缓存仍采用默认 30 秒短 TTL 最终一致性方案。验收记录见 TEST_PLAN.md 第 18 节；本轮仅同步文档，不新增自动化执行记录。阶段 9–11 仍待按用户授权逐步实施，CORS 随 H5 联调处理。
 
 阶段 4 的验收补充包含：登出删除当前会话、其他会话不受影响、登出后原令牌被拒绝、重复登出返回当前约定的 401；详见 `API.md` 和 `TEST_PLAN.md`。
 
@@ -37,7 +37,7 @@
 - Session 默认 TTL：7200 秒。
 - 业务缓存采用 Cache-Aside；当前默认 TTL 30 秒，MySQL 为最终事实来源。采用 30 秒短 TTL 收敛极端并发旧值，属于最终一致性，不保证强一致。
 
-阶段 5 已修复接口契约：创建返回 201；Habit ID 为字符串；响应 UTC 时间带 Z；名称 trim 后按 Unicode 码点校验，空白描述转 NULL；仅明确的习惯名称唯一约束冲突返回 40901。HTTP 回归和构建通过，真实存储及并发验收仍待执行，见 TEST_PLAN.md 第 12 节。
+阶段 5 已修复接口契约：创建返回 201；Habit ID 为字符串；响应 UTC 时间带 Z；名称 trim 后按 Unicode 码点校验，空白描述转 NULL；仅明确的习惯名称唯一约束冲突返回 40901。HTTP 回归和构建通过，真实存储及并发验收已完成，见 TEST_PLAN.md 第 12 节。
 
 ## 3. 阶段依赖与增量契约
 
@@ -70,8 +70,8 @@ Phase 8 已增加业务查询缓存（默认 30 秒，上限为下一业务日�
 | Spring Boot | 4.1.1 |
 | Maven | Wrapper 固定 3.9.11 |
 | MyBatis Starter | 4.1.0 |
-| MySQL | SQL 要求 8.0+；实际 Server 版本待下次联调执行 SELECT VERSION() 记录 |
-| Redis | 认证代码已接入，实际运行版本与联调证据待记录 |
+| MySQL | SQL 要求 8.0+；真实验收已完成；实际 Server 版本未提供，不推测具体版本 |
+| Redis | Session 与业务缓存真实验收已完成；使用 Memurai，具体版本及原始验收输出未提供 |
 | Node / npm、UniApp 启动方式 | 前端阶段确定 |
 
 这些属于开发环境约定，不改变已经确认的业务规则。启动配置见 README，测试证据及限制见 TEST_PLAN.md 第 9–10 节。

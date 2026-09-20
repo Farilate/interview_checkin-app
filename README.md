@@ -4,8 +4,7 @@
 
 ## 当前进度
 
-阶段 1–3 的项目骨架、MySQL 持久层及统一响应已具备；阶段 4 已新增登录、查询当前用户、登出、Redis Session 代码及独立演示 SQL，尚未完成登录模块验收。
-阶段 5 的 Habit 创建、去重及当前用户分页查询已实现，真实存储接口联调仍待验收。阶段 6 已实现 PUT /api/v1/habits/{habitId}/checkins/today、created 标记及今日状态 GET；阶段 7 已实现 GET /habits/{habitId}/streak（返回 streak）。旧 POST 路径已移除。阶段 8 的 today/streak Redis 缓存已接入，校验与 TTL 边界已修复，用户已确认真实 Memurai 的 TTL、Key 内容、写后失效和自然过期验收通过（见测试计划）。前端仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续实现。当前接口契约见 [API 文档](docs/API.md)。
+阶段 1–8 的开发及真实验收均已完成（2026-09-20），覆盖项目骨架、MySQL 持久层、统一响应、登录与登出、Redis Session、Habit 创建/去重/分页、每日打卡与并发安全、今日状态、连续天数及 Redis 业务缓存。阶段 9–11 的前端、前后端联调与最终交付仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续开展。当前接口契约见 [API 文档](docs/API.md)。
 
 ## 后端环境与启动
 
@@ -135,7 +134,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 
 普通 `clean verify` 由 Surefire 执行 214 项回归并打包，不执行真实 MySQL 测试。启用 mysql-it 后，Failsafe 额外执行 PersistenceIT（10 项）和 CheckinConcurrencyIT（1 项真实 MySQL 10 线程并发）。报告分别位于 backend/target/surefire-reports/ 与 failsafe-reports/。
 
-持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，不代表业务接口或 HTTP 并发验收已完成。应用启动不再执行账户写入，测试仍必须指向专用测试库。
+持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，其自动化覆盖范围不包含业务接口或 HTTP 并发；这些真实验收已完成。应用启动不再执行账户写入，测试仍必须指向专用测试库。
 
 ## 当前技术与业务约定
 
@@ -152,8 +151,8 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 
 ## 验证结果与限制
 
-2026-09-20，Java 21.0.12.1 / Maven 3.9.11 执行 clean verify：214 项普通测试全部通过，0 失败、0 错误、0 跳过，打包成功。上述自动化缓存测试使用 Redis 替身，未执行 mysql-it；另于 2026-09-20 由用户确认真实 Memurai 的 TTL、Key 内容、写后失效和自然过期验收通过。此记录来自用户反馈，本轮仅同步文档，未重跑测试。
+2026-09-20，Java 21.0.12.1 / Maven 3.9.11 执行 clean verify：214 项普通测试全部通过，0 失败、0 错误、0 跳过，打包成功。上述自动化缓存测试使用 Redis 替身，未执行 mysql-it；另于 2026-09-20 阶段 1–8 的全部真实验收完成，包括真实 Memurai 的 TTL、Key 内容、写后失效和自然过期。本次文档同步未重跑测试，自动化测试记录保持不变。
 
-真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。这不替代 HTTP + Redis 鉴权端到端并发验收。真实 MySQL/Redis 登录联调、实际会话到期、断网故障、演示 SQL 实际导入和 H5 尚未验收，阶段 4 因此尚未完成全部验收。CORS 留待 H5 联调阶段处理。
+真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。该 Service 测试与已完成的 HTTP + Redis 鉴权并发验收分别记录。阶段 1–8 的真实 MySQL/Redis 联调、会话到期、故障场景和 SQL 初始化验收已完成；H5 与 CORS 留待阶段 9–11。
 
 测试覆盖、报告位置和剩余验收项统一维护在 [测试计划](docs/TEST_PLAN.md) 第 9–10 节。
