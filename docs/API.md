@@ -1,6 +1,6 @@
 # REST API 设计
 
-实现范围：认证、Habit 创建/去重/分页、打卡提交、今日状态和连续天数已实现，第 2–7 节描述当前行为；第 8 节为后续前端消费约定。阶段 1–8 的真实 MySQL/Redis 接口验收已于 2026-09-20 完成，测试状态见 [测试计划](TEST_PLAN.md)。
+实现范围：认证、Habit 创建/去重/分页、打卡提交、今日状态和连续天数已实现，第 2–7 节描述当前行为；第 8 节区分已实现的前端认证、Habit 列表/创建及打卡消费约定。阶段 1–8 的真实 MySQL/Redis 接口验收已于 2026-09-20 完成，测试状态见 [测试计划](TEST_PLAN.md)。
 
 ## 1. 公共约定
 
@@ -136,7 +136,7 @@ HTTP 200 当前响应：
 
 在当前生产 MVC 默认资源映射下，未携带 Authorization 访问不存在的 `/api/v1/**` 路径（不包括匿名登录地址）时，认证拦截先执行，返回 HTTP 401 / 40101，而非 404。同一路径携带有效 Token 并通过用户存在性检查后返回 HTTP 404 / 40400；未受保护的未知路径也返回 40400。这三种情况均由加载生产 WebMvcConfig 和 AuthInterceptor 的真实 HTTP 测试锁定。不要将“所有未知地址都返回 404”作为契约。
 
-`/api/v1/**` 注册认证拦截器，仅排除 `/api/v1/auth/login`。请求属性只在当前请求内有效，不使用 ThreadLocal。会话读取不续期，TTL 来自 `app.session.ttl-seconds`，YAML 映射环境变量为 `SESSION_TTL_SECONDS`，默认 7200 秒。当前未配置跨域规则或单独处理 OPTIONS，H5 跨域预检尚待联调。
+`/api/v1/**` 注册认证拦截器，仅排除 `/api/v1/auth/login`。请求属性只在当前请求内有效，不使用 ThreadLocal。会话读取不续期，TTL 来自 `app.session.ttl-seconds`，YAML 映射环境变量为 `SESSION_TTL_SECONDS`，默认 7200 秒。WebMvcConfig 已对 /api/v1/** 配置 CORS：来源取 app.cors.allowed-origin（APP_CORS_ALLOWED_ORIGIN，默认 http://localhost:5173），允许 GET/POST/PUT/DELETE/OPTIONS 和 Authorization/Content-Type，maxAge=3600，不使用通配来源且不启用 allowCredentials(true)。AuthInterceptor 显式放行 OPTIONS；真实受保护请求仍须 Bearer 认证，缺少令牌返回 40101。
 
 用户名 trim 后须为 3–32 位 ASCII 字母、数字或下划线，再统一转小写。密码须非空白且为 8–72 个 UTF-8 字节，不 trim。演示 SQL 中的账户也遵循这些规则。Session TTL 非正数或不能安全转换为毫秒时在启动阶段拒绝。
 
@@ -292,6 +292,12 @@ HTTP 200，当前响应只包含 streak：
 
 ## 8. 前端消费约定
 
+### 8.1 已实现：认证闭环
+
+统一请求层为 src/api/request.js，使用 uni.request，基础地址 http://localhost:8080/api/v1，超时 10 秒。仅 HTTP 2xx 且 body.code === 0 时返回 body.data；其他失败拒绝为 {status, code, message}，网络失败为 status=0、code=null。禁止根据 message 判断业务。
+
+Token 仅取登录响应 data.token，通过 src/utils/auth.js 统一存入 checkin.auth.token，每次请求重新读取并注入 Bearer。登录页校验非空、提交中禁止重复提交，成功后进入 habits 主页。主页调用 /auth/me 显示 username，401 返回登录页；退出请求成功或失败均清 Token 并返回登录页。该页面已提供 Habit 列表和创建功能，见第 8.2 节。
+
 前端统一请求层集中处理：
 
 - API 基础地址。
@@ -301,7 +307,21 @@ HTTP 200，当前响应只包含 streak：
 - 401 清理本地 Token 并引导重新登录。
 - 503 保留登录信息并提示稍后重试，不错误地当成“退出登录”。
 
-打卡按钮提交中可禁用以改善体验，但并发正确性不能依赖前端按钮状态。
+### 8.2 已实现：Habit 分页与创建
+
+src/api/habit.js 中 getHabits({page=1, pageSize=20}) 调用 GET /habits，createHabit(data) 调用 POST /habits；均复用 request.js。查询响应 data 为 {items, total, page, pageSize}，每条 Habit 包含 id、name、description、createdAt、updatedAt。id 保持十进制字符串，直接使用 habit.id 作为列表 key，不使用 Number 或 parseInt。
+
+主页展示 name 及非空 description，支持上一页/下一页；请求成功后才切换展示页码，失败可重试原目标页。第一页/末页及请求中禁用相应翻页按钮，空列表与错误状态分开显示。
+
+创建仅提交 name、description，HTTP 201/code=0 后清空并关闭表单、重新查询第一页。名称与描述按码点校验长度，不通过控件 UTF-16 maxlength 截断 emoji；描述保留原文，后端统一处理空白转 NULL。重复名称基于 code===40901 提示，不匹配 message。401 返回登录页；其他失败保留表单以便重试。创建成功后的列表刷新若失败，显示列表错误和重试入口，不伪造记录。
+
+### 8.3 已实现：今日状态、打卡与连续天数
+
+habit.js 新增 getTodayStatus(habitId)、checkinToday(habitId)、getStreak(habitId)，全部复用 request.js，ID 保持字符串。GET today 的 data 仅为 {checkedIn}，GET streak 的 data 仅为 {streak}；PUT 的 data 为 {id, habitId, checkinDate, checkedInAt, created}。
+
+每张卡片独立维护 today/streak 的值、加载和错误状态；单个查询失败不使列表消失。分页成功重新创建当前页状态，页版本及刷新版本阻止过期响应写回。40401 显示不存在或无权访问，401 沿用认证处理；不解析 message 判断业务。
+
+按钮在打卡请求及写后同步期间显示 loading 并防重复点击，已打卡时禁用。created=true 与 created=false 都视为成功，随后重新查询该 Habit 的两个 GET；不乐观修改 checkedIn、不递增 streak。网络失败时也尝试同步，以处理写入结果未知的情况。并发正确性仍由后端唯一约束保障。
 
 PUT /habits/{habitId}/checkins/today 成功后使用记录和 created 标记更新页面；created=false 可展示“今日已打卡”。刷新或页面重新激活时调用今日状态 GET 读取 checkedIn，调用连续天数 GET 读取 streak，不再读取旧字段名。
 

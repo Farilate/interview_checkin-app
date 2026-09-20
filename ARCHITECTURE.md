@@ -2,7 +2,7 @@
 
 ## 1. 设计状态与依据
 
-本文件同时说明当前实现和后续设计。阶段 1–8 的开发及真实验收均已完成（2026-09-20），涵盖后端基础、认证、Habit 管理、打卡、连续天数和 Redis 业务缓存；阶段 9–11 的前端、前后端联调与最终交付仍为后续范围。开发应遵循根目录 `AGENTS.md` 及相关文档。
+本文件同时说明当前实现和后续设计。阶段 1–8 的开发及真实验收均已完成（2026-09-20），涵盖后端基础、认证、Habit 管理、打卡、连续天数和 Redis 业务缓存；Phase 9 第一阶段的前端登录闭环、真实联调及 CORS 验证已完成；Habit 列表与创建已完成真实联调；今日状态、打卡和连续天数前端已实现，第三阶段真实浏览器验收已完成；最终交付按后续计划推进。开发应遵循根目录 `AGENTS.md` 及相关文档。
 
 后端使用 Java 21 + Spring Boot；前端使用 UniApp + Vue 3，并以 H5 作为演示目标。
 
@@ -64,7 +64,7 @@ Redis 会话写入失败时不得返回登录成功。
 
 当前实现由 AuthController → AuthServiceImpl → UserMapper / SessionServiceImpl 完成。用户名 trim 后按 Locale.ROOT 转小写，密码不 trim。会话值为用户 ID 字符串，固定 TTL，不滑动续期。登录响应包含 token、tokenType、expiresIn 和 user，用户 ID 为字符串。登录校验用户名范围及密码 UTF-8 字节数；演示账户通过独立 SQL 手工准备。
 
-受保护请求由 AuthInterceptor 查询 Redis，将身份写入本次 HttpServletRequest 属性；`GET /auth/me` 再查询 MySQL 返回安全用户字段。`POST /auth/logout` 删除当前令牌对应的会话，其他令牌不受影响；重复登出被拦截并返回 401。拦截器还通过认证服务确认 MySQL 用户存在，否则撤销当前会话。Redis 会话数据访问故障统一为 50301。H5 跨域配置留待前端联调阶段实现。
+受保护请求由 AuthInterceptor 查询 Redis，将身份写入本次 HttpServletRequest 属性；`GET /auth/me` 再查询 MySQL 返回安全用户字段。`POST /auth/logout` 删除当前令牌对应的会话，其他令牌不受影响；重复登出被拦截并返回 401。拦截器还通过认证服务确认 MySQL 用户存在，否则撤销当前会话。Redis 会话数据访问故障统一为 50301。H5 CORS 已由 WebMvcConfig 配置；OPTIONS 不进行 Session 认证，真实业务请求仍须认证。
 
 ### 4.2 每日打卡（提交已实现）
 
@@ -88,7 +88,7 @@ Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登�
 
 ## 5. 时间、身份与安全约定
 
-身份及密码规则已用于认证模块；Clock、业务日期和资源归属已用于打卡提交。H5 存储和 CORS 属于后续阶段要求。
+身份及密码规则已用于认证模块；Clock、业务日期和资源归属已用于打卡提交。H5 Token 存储与 CORS 已用于前端登录闭环。
 
 - 全局业务时区固定为 `Asia/Shanghai`，通过 `APP_BUSINESS_ZONE` 配置；有业务数据后不能随意修改该语义。
 - 后端使用可注入 `Clock` 获取时间；一次业务请求只确定一次业务日期 D。
@@ -99,7 +99,7 @@ Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登�
 - 当前用户身份只能来自服务端会话；业务请求不接受客户端指定 `userId`。
 - 他人资源与不存在资源统一返回 404，避免泄露资源归属。
 - 密码使用 BCrypt 哈希存储；禁止明文、可逆加密或普通摘要替代密码哈希。
-- H5 Token 暂存 `sessionStorage`；部署环境使用 HTTPS，开发 CORS 仅允许配置的前端来源。
+- H5 Token 通过 UniApp 同步 storage API 存储，统一键为 `checkin.auth.token`，由 `src/utils/auth.js` 管理；部署环境使用 HTTPS，开发 CORS 仅允许配置的前端来源。
 
 ## 6. 配置约定
 
@@ -112,12 +112,12 @@ Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登�
 | `APP_BUSINESS_ZONE` | 已接入：默认 `Asia/Shanghai`，配置 app.business-zone，供业务 Clock 使用 |
 | `SESSION_TTL_SECONDS` | 当前 YAML 显式映射至 app.session.ttl-seconds，默认 7200 秒，须为正数；固定过期 |
 | `APP_CACHE_TTL_SECONDS` | 已接入：默认 30 秒，上限为下一业务日零点 |
-| `CORS_ALLOWED_ORIGINS` | 规划项：显式允许的 H5 Origin |
+| `APP_CORS_ALLOWED_ORIGIN` | 已接入 app.cors.allowed-origin，默认 http://localhost:5173 |
 | `SERVER_PORT` | 默认 8080 |
-| `VITE_API_BASE_URL` | 规划项：前端 API 基础地址 |
+| 前端 API 基础地址 | 当前集中定义在 src/api/request.js：http://localhost:8080/api/v1；未接入 VITE_API_BASE_URL |
 | `SPRING_PROFILES_ACTIVE` | 当前默认 local；可在运行环境覆盖 |
 
-演示账户来自可选的 `database/demo-data.sql`，不由应用启动创建。真实本地配置位于 `backend/config/application-local.yml`，示例可提交，真实文件不提交、不打包；从 backend 工作目录读取外部配置。业务时区和业务缓存已接入；CORS 和前端配置仍为规划项。
+演示账户来自可选的 `database/demo-data.sql`，不由应用启动创建。真实本地配置位于 `backend/config/application-local.yml`，示例可提交，真实文件不提交、不打包；从 backend 工作目录读取外部配置。业务时区和业务缓存已接入；CORS 已接入环境变量，前端基础地址集中在 request.js。
 
 配置由运行环境注入，命令行和 IDEA 配置方式见 [README](README.md)。仓库只提供不含真实凭证的配置示例。
 
@@ -142,3 +142,36 @@ MySQL 是最终业务数据来源；Redis 只承担服务端登录态和查询�
 ## 8. 可选加分项：用户注册（主线完成后最后做）
 
 注册仅作为 Phase 1–11 主线全部完成后最后考虑的可选加分项，不影响主线交付和验收。若单独授权实施：请求 DTO → Service 校验与 BCrypt → Mapper 写入 users，由用户名唯一约束保证并发安全。不使用启动回调创建用户。是否公开放行、是否注册后创建 Redis Session 在实施前确定；自动登录若被采用，必须明确 MySQL 已提交而 Session 写入失败时的行为。具体规划见 IMPLEMENTATION_PLAN.md 第 6 节。
+
+## 9. 前端 Habit 列表与创建（已实现）
+
+习惯主页保留 /auth/me 和退出登录，通过 src/api/habit.js → request.js → uni.request 调用 GET/POST /habits。列表状态、分页与创建表单使用 Vue ref 管理，不引入状态管理库。分页只使用后端 items/total/page/pageSize；Habit ID 保持字符串。创建成功重新查询第一页，不做乐观插入；重名按 code=40901 处理，401 沿用清 Token 与返回登录页流程。
+
+Vite 开发端口固定为 5173，strictPort=true，避免自动换端口导致 Origin 与后端 CORS 不匹配。列表、分页、创建及重名提示已完成真实联调；今日状态、打卡和 streak 前端已实现，第三阶段真实浏览器验收已完成。
+
+## 10. 今日状态、打卡与连续天数前端（已实现）
+
+习惯主页通过 habit.js 的 getTodayStatus、checkinToday、getStreak 复用统一 request 层。列表成功后为每条字符串 Habit ID 建立独立状态，today 与 streak 分别维护值、loading 和 error；不增加后端聚合接口。页版本与卡片查询版本用于忽略过期响应，退出页面后停止更新。
+
+PUT 返回 created=true/false 均触发两个 GET 重新同步，页面只展示服务器状态；同步失败保留卡片和操作提示，不用旧值伪装最新结果。按钮防重复点击仅改善体验，幂等仍由后端和数据库唯一约束保障。未引入 Pinia、Axios 或新后端逻辑；收尾阶段已新增独立 Vitest 纯 JS 测试。
+
+## 11. 前端收尾与轻量测试
+
+Node.js 24.19.0 / npm 11.17.0；Vitest 与现有 Vite 5 兼容，独立 vitest.config.mjs 仅运行 tests 下的 Node 环境测试，不加载 UniApp 插件。测试以 globalThis.uni 替身覆盖 auth 存储、request 协议判断与 API 路径参数，不访问真实服务。保留 frontend/shims-uni.d.ts，移除重复的 src/shime-uni.d.ts。
+
+refreshCheckin 仅在当前页、当前轮 today/streak 均同步成功后清除陈旧 actionError；部分失败或旧请求不能清除提示。真实浏览器已验收 today/streak、首次及重复 PUT、写后同步、刷新持久化、分页 ID 对应与 logout。
+
+## 12. 最终验证状态
+
+| 测试集合 | 用例数 | 结果 |
+| --- | --- | --- |
+| 后端普通测试 | 219 | 通过 |
+| 真实 MySQL 集成测试 | 11 | 通过 |
+| 前端 Vitest（4 个文件） | 36 | 通过 |
+| 合计（不重复用例集合） | **266** | **全部通过** |
+
+Failures=0，Errors=0，Skipped=0。Spring Boot 打包、UniApp H5 构建、真实浏览器联调、真实 MySQL IT 和真实 Redis 验收均通过。
+
+计数口径：219 + 11 + 36 = 266。执行 `-Pmysql-it clean verify` 会重新运行 219 项普通后端测试，再执行 11 项 MySQL IT；重复运行不增加用例集合总数。人工浏览器与 Redis 验收不另计入这 266 项自动化用例。
+
+以上验证不改变 MySQL 持久化、Redis 最终一致性及后端负责业务日期和连续天数的架构规则。前端核心功能收尾、自动化回归和构建链路已完成；注册仍不属于主线必做范围。

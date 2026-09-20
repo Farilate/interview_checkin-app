@@ -33,13 +33,13 @@ spring:
 app:
   session:
     ttl-seconds: ${SESSION_TTL_SECONDS:7200}
-
   # today / streak 业务缓存默认 30 秒，通过短 TTL 收敛极端并发旧值。
   cache:
     ttl-seconds: ${APP_CACHE_TTL_SECONDS:30}
-
   # 已实现的打卡、今日状态及连续天数统一使用该业务时区。
   business-zone: ${APP_BUSINESS_ZONE:Asia/Shanghai}
+  cors:
+    allowed-origin: ${APP_CORS_ALLOWED_ORIGIN:http://localhost:5173}
 
 mybatis:
   configuration:
