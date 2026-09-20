@@ -160,3 +160,18 @@ PUT 返回 created=true/false 均触发两个 GET 重新同步，页面只展示
 Node.js 24.19.0 / npm 11.17.0；Vitest 与现有 Vite 5 兼容，独立 vitest.config.mjs 仅运行 tests 下的 Node 环境测试，不加载 UniApp 插件。测试以 globalThis.uni 替身覆盖 auth 存储、request 协议判断与 API 路径参数，不访问真实服务。保留 frontend/shims-uni.d.ts，移除重复的 src/shime-uni.d.ts。
 
 refreshCheckin 仅在当前页、当前轮 today/streak 均同步成功后清除陈旧 actionError；部分失败或旧请求不能清除提示。真实浏览器已验收 today/streak、首次及重复 PUT、写后同步、刷新持久化、分页 ID 对应与 logout。
+
+## 12. 最终验证状态
+
+| 测试集合 | 用例数 | 结果 |
+| --- | --- | --- |
+| 后端普通测试 | 219 | 通过 |
+| 真实 MySQL 集成测试 | 11 | 通过 |
+| 前端 Vitest（4 个文件） | 36 | 通过 |
+| 合计（不重复用例集合） | **266** | **全部通过** |
+
+Failures=0，Errors=0，Skipped=0。Spring Boot 打包、UniApp H5 构建、真实浏览器联调、真实 MySQL IT 和真实 Redis 验收均通过。
+
+计数口径：219 + 11 + 36 = 266。执行 `-Pmysql-it clean verify` 会重新运行 219 项普通后端测试，再执行 11 项 MySQL IT；重复运行不增加用例集合总数。人工浏览器与 Redis 验收不另计入这 266 项自动化用例。
+
+以上验证不改变 MySQL 持久化、Redis 最终一致性及后端负责业务日期和连续天数的架构规则。前端核心功能收尾、自动化回归和构建链路已完成；注册仍不属于主线必做范围。

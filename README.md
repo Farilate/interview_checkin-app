@@ -152,11 +152,22 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 
 ## 验证结果与限制
 
-2026-09-20，Java 21.0.12.1 / Maven 3.9.11 执行 clean verify：219 项普通测试全部通过，0 失败、0 错误、0 跳过，打包成功。其中包含 5 项 CORS Contract 测试；自动化缓存测试使用 Redis 替身，本次未执行 mysql-it；另于 2026-09-20 阶段 1–8 的全部真实验收完成，包括真实 Memurai 的 TTL、Key 内容、写后失效和自然过期。本次文档同步未重跑测试，自动化测试记录保持不变。
+| 测试集合 | 用例数 | 结果 |
+| --- | --- | --- |
+| 后端普通测试 | 219 | 通过 |
+| 真实 MySQL 集成测试 | 11 | 通过 |
+| 前端 Vitest（4 个文件） | 36 | 通过 |
+| 合计（不重复用例集合） | **266** | **全部通过** |
+
+Failures=0，Errors=0，Skipped=0。Spring Boot 打包、UniApp H5 构建、真实浏览器联调、真实 MySQL IT 和真实 Redis 验收均通过。
+
+计数口径：219 + 11 + 36 = 266。执行 `-Pmysql-it clean verify` 会重新运行 219 项普通后端测试，再执行 11 项 MySQL IT；重复运行不增加用例集合总数。人工浏览器与 Redis 验收不另计入这 266 项自动化用例。
+
+前端实际结果：Vitest Test Files 4 passed (4)、Tests 36 passed (36)；npm run build:h5 输出 DONE Build complete。最终复验已于 2026-09-20 实际执行并通过。
 
 真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。该 Service 测试与已完成的 HTTP + Redis 鉴权并发验收分别记录。阶段 1–8 的真实 MySQL/Redis 联调、会话到期、故障场景和 SQL 初始化验收已完成；H5 登录闭环与 CORS 已验证，Habit 列表与创建已完成真实联调，今日状态、打卡及连续天数前端已实现，第三阶段完整业务链路人工验收已通过。
 
-测试覆盖、报告位置和剩余验收项统一维护在 [测试计划](docs/TEST_PLAN.md) 第 9–10 节。
+[测试计划](docs/TEST_PLAN.md) 的最终汇总见第 23 节，历史覆盖与报告位置见第 9–10 节。
 
 ## 前端启动与习惯主页
 
@@ -196,4 +207,4 @@ npm run dev:h5
 
 收尾修复：today/streak 当前轮均成功同步后清除旧 actionError；任一查询失败仍保留错误，不改变幂等语义。删除重复的 src/shime-uni.d.ts，保留 frontend/shims-uni.d.ts；Vitest 使用独立配置，不改变 UniApp 编译配置。
 
-本轮前端验证：Vitest 4 个文件、36 项测试全部通过，npm run build:h5 构建成功。详细覆盖见 docs/TEST_PLAN.md 第 22 节；后端未修改，219 项后端测试保留历史记录。
+本轮前端验证：Vitest 4 个文件、36 项测试全部通过，npm run build:h5 构建成功。详细覆盖见 docs/TEST_PLAN.md 第 22 节；最终后端普通测试 219 项、MySQL IT 11 项均通过，合并计数见上文验证汇总。
