@@ -20,7 +20,7 @@
 
 ## 2. 当前进度与已确认决策
 
-当前进度：阶段 1–8 的开发及真实验收均已完成（2026-09-20）。范围包括项目初始化、MySQL 建表与持久层、统一响应和异常处理、登录/当前用户/登出及 Redis Session、Habit 创建/去重/分页、每日打卡与 HTTP 鉴权并发安全、今日状态、连续天数与日期边界，以及 Redis 业务缓存的命中、回源、TTL、写后失效、自然过期和故障降级。缓存仍采用默认 30 秒短 TTL 最终一致性方案。验收记录见 TEST_PLAN.md 第 18 节；本轮仅同步文档，不新增自动化执行记录。阶段 9–11 仍待按用户授权逐步实施，CORS 随 H5 联调处理。
+当前进度：阶段 1–8 的开发及真实验收均已完成（2026-09-20）。范围包括项目初始化、MySQL 建表与持久层、统一响应和异常处理、登录/当前用户/登出及 Redis Session、Habit 创建/去重/分页、每日打卡与 HTTP 鉴权并发安全、今日状态、连续天数与日期边界，以及 Redis 业务缓存的命中、回源、TTL、写后失效、自然过期和故障降级。缓存仍采用默认 30 秒短 TTL 最终一致性方案。验收记录见 TEST_PLAN.md 第 18 节；本轮仅同步文档，不新增自动化执行记录。Phase 9 第一阶段已完成真实登录闭环和 CORS 验证；Habit 列表、创建、今日状态、打卡和 streak 前端尚未实现，Phase 9 剩余部分及 Phase 10–11 继续按授权推进。
 
 阶段 4 的验收补充包含：登出删除当前会话、其他会话不受影响、登出后原令牌被拒绝、重复登出返回当前约定的 401；详见 `API.md` 和 `TEST_PLAN.md`。
 
@@ -38,6 +38,14 @@
 - 业务缓存采用 Cache-Aside；当前默认 TTL 30 秒，MySQL 为最终事实来源。采用 30 秒短 TTL 收敛极端并发旧值，属于最终一致性，不保证强一致。
 
 阶段 5 已修复接口契约：创建返回 201；Habit ID 为字符串；响应 UTC 时间带 Z；名称 trim 后按 Unicode 码点校验，空白描述转 NULL；仅明确的习惯名称唯一约束冲突返回 40901。HTTP 回归和构建通过，真实存储及并发验收已完成，见 TEST_PLAN.md 第 12 节。
+
+### Phase 9 第一阶段：登录闭环（已完成）
+
+- 已建立 UniApp + Vue 3 + Vite H5 工程，统一 uni.request 封装和 Token 存储。
+- 登录页调用真实 POST /auth/login；验证页调用 GET /auth/me；退出调用 POST /auth/logout。
+- 已完成 H5 与 Spring Boot 真实联调，精确 Origin 的 CORS 预检验证通过。
+- habits 页面目前仅展示当前用户名并支持退出，不代表 Habit 业务前端已完成。
+- npm run build:h5 成功；后端 clean verify 219 项通过，含 5 项 CORS Contract 测试。
 
 ## 3. 阶段依赖与增量契约
 
@@ -72,7 +80,7 @@ Phase 8 已增加业务查询缓存（默认 30 秒，上限为下一业务日�
 | MyBatis Starter | 4.1.0 |
 | MySQL | SQL 要求 8.0+；真实验收已完成；实际 Server 版本未提供，不推测具体版本 |
 | Redis | Session 与业务缓存真实验收已完成；使用 Memurai，具体版本及原始验收输出未提供 |
-| Node / npm、UniApp 启动方式 | 前端阶段确定 |
+| 前端 | UniApp + Vue 3 + Vite H5；frontend 下 npm run dev:h5 启动、npm run build:h5 构建；Node/npm 具体版本未记录 |
 
 这些属于开发环境约定，不改变已经确认的业务规则。启动配置见 README，测试证据及限制见 TEST_PLAN.md 第 9–10 节。
 

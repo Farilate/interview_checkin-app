@@ -1,6 +1,6 @@
 # REST API 设计
 
-实现范围：认证、Habit 创建/去重/分页、打卡提交、今日状态和连续天数已实现，第 2–7 节描述当前行为；第 8 节为后续前端消费约定。阶段 1–8 的真实 MySQL/Redis 接口验收已于 2026-09-20 完成，测试状态见 [测试计划](TEST_PLAN.md)。
+实现范围：认证、Habit 创建/去重/分页、打卡提交、今日状态和连续天数已实现，第 2–7 节描述当前行为；第 8 节区分已实现的前端认证与后续 Habit 消费约定。阶段 1–8 的真实 MySQL/Redis 接口验收已于 2026-09-20 完成，测试状态见 [测试计划](TEST_PLAN.md)。
 
 ## 1. 公共约定
 
@@ -136,7 +136,7 @@ HTTP 200 当前响应：
 
 在当前生产 MVC 默认资源映射下，未携带 Authorization 访问不存在的 `/api/v1/**` 路径（不包括匿名登录地址）时，认证拦截先执行，返回 HTTP 401 / 40101，而非 404。同一路径携带有效 Token 并通过用户存在性检查后返回 HTTP 404 / 40400；未受保护的未知路径也返回 40400。这三种情况均由加载生产 WebMvcConfig 和 AuthInterceptor 的真实 HTTP 测试锁定。不要将“所有未知地址都返回 404”作为契约。
 
-`/api/v1/**` 注册认证拦截器，仅排除 `/api/v1/auth/login`。请求属性只在当前请求内有效，不使用 ThreadLocal。会话读取不续期，TTL 来自 `app.session.ttl-seconds`，YAML 映射环境变量为 `SESSION_TTL_SECONDS`，默认 7200 秒。当前未配置跨域规则或单独处理 OPTIONS，H5 跨域预检尚待联调。
+`/api/v1/**` 注册认证拦截器，仅排除 `/api/v1/auth/login`。请求属性只在当前请求内有效，不使用 ThreadLocal。会话读取不续期，TTL 来自 `app.session.ttl-seconds`，YAML 映射环境变量为 `SESSION_TTL_SECONDS`，默认 7200 秒。WebMvcConfig 已对 /api/v1/** 配置 CORS：来源取 app.cors.allowed-origin（APP_CORS_ALLOWED_ORIGIN，默认 http://localhost:5173），允许 GET/POST/PUT/DELETE/OPTIONS 和 Authorization/Content-Type，maxAge=3600，不使用通配来源且不启用 allowCredentials(true)。AuthInterceptor 显式放行 OPTIONS；真实受保护请求仍须 Bearer 认证，缺少令牌返回 40101。
 
 用户名 trim 后须为 3–32 位 ASCII 字母、数字或下划线，再统一转小写。密码须非空白且为 8–72 个 UTF-8 字节，不 trim。演示 SQL 中的账户也遵循这些规则。Session TTL 非正数或不能安全转换为毫秒时在启动阶段拒绝。
 
@@ -292,6 +292,12 @@ HTTP 200，当前响应只包含 streak：
 
 ## 8. 前端消费约定
 
+### 8.1 已实现：认证闭环
+
+统一请求层为 src/api/request.js，使用 uni.request，基础地址 http://localhost:8080/api/v1，超时 10 秒。仅 HTTP 2xx 且 body.code === 0 时返回 body.data；其他失败拒绝为 {status, code, message}，网络失败为 status=0、code=null。禁止根据 message 判断业务。
+
+Token 仅取登录响应 data.token，通过 src/utils/auth.js 统一存入 checkin.auth.token，每次请求重新读取并注入 Bearer。登录页校验非空、提交中禁止重复提交，成功后进入 habits 验证页。验证页调用 /auth/me 显示 username，401 返回登录页；退出请求成功或失败均清 Token 并返回登录页。该页面不提供 Habit 业务。
+
 前端统一请求层集中处理：
 
 - API 基础地址。
@@ -300,6 +306,8 @@ HTTP 200，当前响应只包含 streak：
 - 网络错误与超时。
 - 401 清理本地 Token 并引导重新登录。
 - 503 保留登录信息并提示稍后重试，不错误地当成“退出登录”。
+
+### 8.2 后续 Habit 前端消费约定（未实现）
 
 打卡按钮提交中可禁用以改善体验，但并发正确性不能依赖前端按钮状态。
 

@@ -43,7 +43,7 @@ public class AuthInterceptor implements HandlerInterceptor {
      * @param request 当前请求，认证成功后写入用户 ID 属性
      * @param response 当前响应，失败响应由统一异常处理器生成
      * @param handler 本次请求匹配的处理器
-     * @return 会话有效且数据库用户存在时返回 true，允许继续处理请求
+     * @return OPTIONS 预检或会话有效且数据库用户存在时返回 true
      * @throws BusinessException 请求头或身份无效时为未登录；Redis 查询或清理故障时为会话不可用
      */
     @Override
@@ -51,6 +51,11 @@ public class AuthInterceptor implements HandlerInterceptor {
             HttpServletRequest request,
             HttpServletResponse response,
             Object handler) {
+
+        // 浏览器预检不携带会话令牌；放行 OPTIONS，真实业务请求继续执行原认证规则。
+        if ("OPTIONS".equals(request.getMethod())) {
+            return true;
+        }
 
         String authorization =
                 request.getHeader("Authorization");

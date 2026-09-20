@@ -4,7 +4,7 @@
 
 ## 当前进度
 
-阶段 1–8 的开发及真实验收均已完成（2026-09-20），覆盖项目骨架、MySQL 持久层、统一响应、登录与登出、Redis Session、Habit 创建/去重/分页、每日打卡与并发安全、今日状态、连续天数及 Redis 业务缓存。阶段 9–11 的前端、前后端联调与最终交付仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续开展。当前接口契约见 [API 文档](docs/API.md)。
+阶段 1–8 的开发及真实验收均已完成（2026-09-20），覆盖项目骨架、MySQL 持久层、统一响应、登录与登出、Redis Session、Habit 创建/去重/分页、每日打卡与并发安全、今日状态、连续天数及 Redis 业务缓存。Phase 9 第一阶段的前端登录闭环及 H5 与 Spring Boot 真实联调已完成，CORS 预检已配置并验证。Habit 前端与完整业务联调、最终交付仍按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 后续开展。当前接口契约见 [API 文档](docs/API.md)。
 
 ## 后端环境与启动
 
@@ -50,6 +50,7 @@ IDEA：将 `backend/pom.xml` 添加为 Maven 项目，项目 SDK、Maven 导入�
 | `DB_URL`            | 无，必填        | MySQL JDBC URL，包含明确的数据库名                   |
 | `DB_USERNAME`       | 无，必填        | 数据库用户                                           |
 | `DB_PASSWORD`       | 无默认密码        | 通过环境变量注入，或在不提交、不打包的外部 local 配置中设置 `spring.datasource.password` |
+| `APP_CORS_ALLOWED_ORIGIN` | `http://localhost:5173` | 允许跨域访问 /api/v1/** 的单个前端 Origin |
 | `SERVER_PORT`       | `8080`          | HTTP 监听端口                                        |
 | `REDIS_HOST` | `localhost` | 登录会话 Redis 地址 |
 | `REDIS_PORT` | `6379` | Redis 端口 |
@@ -65,7 +66,7 @@ $env:SERVER_PORT = '8081'
 .\mvnw.cmd spring-boot:run
 ```
 
-Redis 地址和 Session TTL 已接入。Redis 认证及库编号可通过 Spring 配置属性 `spring.data.redis.username`、`spring.data.redis.password`、`spring.data.redis.database` 提供，或使用对应标准环境变量 `SPRING_DATA_REDIS_USERNAME`、`SPRING_DATA_REDIS_PASSWORD`、`SPRING_DATA_REDIS_DATABASE`；当前 YAML 未映射简写变量 `REDIS_USERNAME`、`REDIS_PASSWORD`、`REDIS_DATABASE`。业务时区已由 TimeConfig 接入，app.business-zone 默认 Asia/Shanghai；业务缓存 TTL 已接入 APP_CACHE_TTL_SECONDS，默认 30 秒且不超过下一业务日零点；CORS 尚未接入。
+Redis 地址和 Session TTL 已接入。Redis 认证及库编号可通过 Spring 配置属性 `spring.data.redis.username`、`spring.data.redis.password`、`spring.data.redis.database` 提供，或使用对应标准环境变量 `SPRING_DATA_REDIS_USERNAME`、`SPRING_DATA_REDIS_PASSWORD`、`SPRING_DATA_REDIS_DATABASE`；当前 YAML 未映射简写变量 `REDIS_USERNAME`、`REDIS_PASSWORD`、`REDIS_DATABASE`。业务时区已由 TimeConfig 接入，app.business-zone 默认 Asia/Shanghai；业务缓存 TTL 已接入 APP_CACHE_TTL_SECONDS，默认 30 秒且不超过下一业务日零点；CORS 已接入 APP_CORS_ALLOWED_ORIGIN，默认仅允许 http://localhost:5173。
 
 真实本地配置放在 `backend/config/application-local.yml`，不再放进 `src/main/resources/`。可复制 [配置示例](backend/config/application-local.example.yml) 后填写；真实文件由 Git 忽略，也不参与 Maven 打包。示例通过 `${DB_PASSWORD}` 引用环境变量；个人 local 文件也可以直接填写 `spring.datasource.password`，但不得提交或分发。若要用环境变量强制覆盖 local 中的直接配置，使用 `SPRING_DATASOURCE_PASSWORD`。应用启动不创建用户，原演示初始化配置已取消。
 
@@ -81,14 +82,14 @@ Redis 地址和 Session TTL 已接入。Redis 认证及库编号可通过 Spring
 
 ## 登录、当前用户和登出
 
-启动前准备已建表的 MySQL、可访问的 Redis 及已有账户或手工导入的演示账户。以下是当前后端行为，不代表已通过联调：
+启动前准备已建表的 MySQL、可访问的 Redis 及已有账户或手工导入的演示账户。以下认证流程已完成 H5 与真实后端联调：
 
 1. `POST /api/v1/auth/login`：提交 JSON 用户名和密码，成功返回 `data.token`、`tokenType`、`expiresIn` 和 `user`。用户名 trim 后转小写，密码不 trim。
 2. `GET /api/v1/auth/me`：携带 `Authorization: Bearer <token>`，返回 `data.id` 和 `data.username`；ID 为十进制字符串。
 3. `POST /api/v1/auth/logout`：携带相同请求头，无需请求体，成功返回 `{"code":0,"message":"ok","data":null}`。
 4. 登出后该令牌再次访问受保护接口或再次登出返回 HTTP 401 / `40101`；同一用户的其他令牌仍有效。
 
-Redis 会话键为 `checkin:v1:session:{tokenSha256}`，值是十进制用户 ID 字符串，默认固定 7200 秒过期。会话不存在时需要重新登录，不能从 MySQL 恢复令牌。当前尚无 H5 跨域配置，跨域联调前需补齐。
+Redis 会话键为 `checkin:v1:session:{tokenSha256}`，值是十进制用户 ID 字符串，默认固定 7200 秒过期。会话不存在时需要重新登录，不能从 MySQL 恢复令牌。H5 跨域配置与预检验证已完成，具体规则见下文前端启动说明。
 
 ## MySQL 初始化与持久层
 
@@ -132,7 +133,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 .\mvnw.cmd -B -ntp -Pmysql-it clean verify
 ```
 
-普通 `clean verify` 由 Surefire 执行 214 项回归并打包，不执行真实 MySQL 测试。启用 mysql-it 后，Failsafe 额外执行 PersistenceIT（10 项）和 CheckinConcurrencyIT（1 项真实 MySQL 10 线程并发）。报告分别位于 backend/target/surefire-reports/ 与 failsafe-reports/。
+普通 `clean verify` 由 Surefire 执行 219 项回归并打包，不执行真实 MySQL 测试。启用 mysql-it 后，Failsafe 额外执行 PersistenceIT（10 项）和 CheckinConcurrencyIT（1 项真实 MySQL 10 线程并发）。报告分别位于 backend/target/surefire-reports/ 与 failsafe-reports/。
 
 持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，其自动化覆盖范围不包含业务接口或 HTTP 并发；这些真实验收已完成。应用启动不再执行账户写入，测试仍必须指向专用测试库。
 
@@ -151,8 +152,24 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 
 ## 验证结果与限制
 
-2026-09-20，Java 21.0.12.1 / Maven 3.9.11 执行 clean verify：214 项普通测试全部通过，0 失败、0 错误、0 跳过，打包成功。上述自动化缓存测试使用 Redis 替身，未执行 mysql-it；另于 2026-09-20 阶段 1–8 的全部真实验收完成，包括真实 Memurai 的 TTL、Key 内容、写后失效和自然过期。本次文档同步未重跑测试，自动化测试记录保持不变。
+2026-09-20，Java 21.0.12.1 / Maven 3.9.11 执行 clean verify：219 项普通测试全部通过，0 失败、0 错误、0 跳过，打包成功。其中包含 5 项 CORS Contract 测试；自动化缓存测试使用 Redis 替身，本次未执行 mysql-it；另于 2026-09-20 阶段 1–8 的全部真实验收完成，包括真实 Memurai 的 TTL、Key 内容、写后失效和自然过期。本次文档同步未重跑测试，自动化测试记录保持不变。
 
-真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。该 Service 测试与已完成的 HTTP + Redis 鉴权并发验收分别记录。阶段 1–8 的真实 MySQL/Redis 联调、会话到期、故障场景和 SQL 初始化验收已完成；H5 与 CORS 留待阶段 9–11。
+真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。该 Service 测试与已完成的 HTTP + Redis 鉴权并发验收分别记录。阶段 1–8 的真实 MySQL/Redis 联调、会话到期、故障场景和 SQL 初始化验收已完成；H5 登录闭环与 CORS 已验证，Habit 前端和完整业务链路仍待后续阶段。
 
 测试覆盖、报告位置和剩余验收项统一维护在 [测试计划](docs/TEST_PLAN.md) 第 9–10 节。
+
+## 前端启动与登录闭环
+
+在仓库根目录打开终端：
+
+```powershell
+cd frontend
+npm install
+npm run dev:h5
+```
+
+访问 `http://localhost:5173/`，入口为登录页。后端应运行于 `http://localhost:8080`；当前 API 地址在 `src/api/request.js` 中统一设置为 `http://localhost:8080/api/v1`。若开发服务器端口变化，需将后端 `APP_CORS_ALLOWED_ORIGIN` 改为实际 Origin 并重启后端；localhost 与 127.0.0.1 属于不同 Origin。
+
+登录调用 POST /auth/login，保存响应 data.token 后跳转 pages/habits/habits；该页仅调用 GET /auth/me 显示用户名。退出调用 POST /auth/logout，无论请求成功或失败均清除本地 Token 并返回登录页。所有接口使用 uni.request；每次请求读取本地 Token 并注入 Bearer，HTTP 401 清 Token，/auth/me 的 401 由页面导航回登录。未使用 Mock、axios、Pinia 或大型 UI 库。
+
+生产构建执行 `npm run build:h5`，输出位于 frontend/dist/build/h5。H5 构建与真实认证联调已完成；本阶段尚无 Habit 列表、创建、今日状态、打卡或 streak 页面功能。
