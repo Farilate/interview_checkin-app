@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** 真实 MySQL 的 Service 并发验收；创建独立测试数据，结束后只清理该用户的数据。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("local")
-class CheckinConcurrencyTest {
+class CheckinConcurrencyIT {
 
     @Autowired
     private CheckinRecordService checkinRecordService;

@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -399,9 +400,9 @@ class HabitContractTest {
         }
     }
 
-    /** 不存在、他人习惯以及非正数 ID 当前统一查无资源，不能读取或写入打卡记录。 */
+    /** 合法正整数对应的习惯不存在时返回 40401，不能读取或写入打卡记录。 */
     @ParameterizedTest
-    @ValueSource(strings = {"101", "0", "-1"})
+    @ValueSource(strings = {"101"})
     void checkinMissingHabitDoesNotTouchRecords(String id) throws Exception {
         check(send("PUT", "/" + id + "/checkins/today", "owner", null), 404, 40401);
         verifyNoInteractions(records);
@@ -515,7 +516,7 @@ class HabitContractTest {
         verify(records, never()).insert(any());
     }
 
-    /** 两个 GET 均需要认证；他人/不存在习惯及非正数 ID 当前返回 40401。 */
+    /** 两个 GET 均需要认证；合法 ID 对应他人或不存在习惯时返回 40401。 */
     @ParameterizedTest
     @ValueSource(strings = {"/checkins/today", "/streak"})
     void checkinQueriesEnforceAuthenticationAndOwnership(String suffix) throws Exception {
@@ -523,7 +524,7 @@ class HabitContractTest {
         check(send("GET", "/101" + suffix, null, null), 401, 40101);
         check(send("GET", "/101" + suffix, "expired", null), 401, 40101);
         check(send("GET", "/101" + suffix + "?userId=7", "other", null), 404, 40401);
-        for (String id : List.of("999", "0", "-1")) {
+        for (String id : List.of("999")) {
             check(send("GET", "/" + id + suffix, "owner", null), 404, 40401);
         }
         for (String id : List.of("abc", "9223372036854775808")) {
@@ -559,6 +560,18 @@ class HabitContractTest {
         check(send("GET", "/101" + suffix, "owner", null), 503, 50302);
         when(habits.findByUserIdAndId(7L, 101L)).thenThrow(new DataIntegrityViolationException("private-db-detail"));
         check(send("GET", "/101" + suffix, "owner", null), 500, 50001);
+    }
+
+    /** 三个路径接口均在访问业务 Mapper 前拒绝 0 和负数，区分参数错误与资源不存在。 */
+    @ParameterizedTest
+    @CsvSource({
+            "PUT,/checkins/today,0", "PUT,/checkins/today,-1",
+            "GET,/checkins/today,0", "GET,/checkins/today,-1",
+            "GET,/streak,0", "GET,/streak,-1"
+    })
+    void nonPositiveHabitIdIsBadRequest(String method, String suffix, String id) throws Exception {
+        check(send(method, "/" + id + suffix, "owner", null), 400, 40001);
+        verifyNoInteractions(habits, records);
     }
 
     /** 构造当前用户拥有的习惯，并模拟数据库主键回填。 */

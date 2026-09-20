@@ -7,6 +7,7 @@ import com.example.checkin.dto.HabitResponse;
 import com.example.checkin.service.HabitService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import org.springframework.web.bind.annotation.*;
 import com.example.checkin.dto.PageRequest;
 import com.example.checkin.dto.PageResponse;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.PutMapping;
  *
  * <p>当前用户身份统一由 AuthInterceptor 根据登录 Token 解析，
  * 客户端不能自行指定 userId。
+ * <p>habitId 由 MVC 校验为正整数；范围非法返回 40001，合法但无权访问或不存在返回 40401。
  */
 @RestController
 @RequestMapping("/api/v1/habits")
@@ -79,7 +81,7 @@ public class HabitController {
      */
     @PutMapping("/{habitId}/checkins/today")
     public ApiResponse<CheckinResponse> checkIn(
-            @PathVariable long habitId,
+            @PathVariable @Positive long habitId,
             HttpServletRequest request) {
 
         Long userId = (Long) request.getAttribute(
@@ -96,7 +98,7 @@ public class HabitController {
      */
     @GetMapping("/{habitId}/streak")
     public ApiResponse<StreakResponse> getStreak(
-            @PathVariable long habitId,
+            @PathVariable @Positive long habitId,
             HttpServletRequest request) {
 
         Long userId = (Long) request.getAttribute(
@@ -118,7 +120,7 @@ public class HabitController {
      */
     @GetMapping("/{habitId}/checkins/today")
     public ApiResponse<TodayCheckinStatusResponse> getTodayCheckinStatus(
-            @PathVariable long habitId,
+            @PathVariable @Positive long habitId,
             HttpServletRequest request) {
 
         Long userId = (Long) request.getAttribute(

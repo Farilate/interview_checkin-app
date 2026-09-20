@@ -109,7 +109,7 @@ Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登�
 | `REDIS_HOST`、`REDIS_PORT` | 已接入；地址默认 localhost，端口默认 6379 |
 | `SPRING_DATA_REDIS_DATABASE` | Spring 标准环境变量，库默认 0；未映射简写 REDIS_DATABASE |
 | `SPRING_DATA_REDIS_USERNAME`、`SPRING_DATA_REDIS_PASSWORD` | Spring 标准 Redis 认证配置；未映射简写 REDIS_USERNAME / REDIS_PASSWORD |
-| `APP_BUSINESS_ZONE` | 规划项：默认 `Asia/Shanghai`，Phase 6 接入 |
+| `APP_BUSINESS_ZONE` | 已接入：默认 `Asia/Shanghai`，配置 app.business-zone，供业务 Clock 使用 |
 | `SESSION_TTL_SECONDS` | 当前 YAML 显式映射至 app.session.ttl-seconds，默认 7200 秒，须为正数；固定过期 |
 | `APP_CACHE_TTL_SECONDS` | 规划项：业务缓存短 TTL，默认 30 秒 |
 | `CORS_ALLOWED_ORIGINS` | 规划项：显式允许的 H5 Origin |
@@ -117,7 +117,7 @@ Redis 业务缓存只是性能优化；MySQL 始终是业务事实来源。登�
 | `VITE_API_BASE_URL` | 规划项：前端 API 基础地址 |
 | `SPRING_PROFILES_ACTIVE` | 当前默认 local；可在运行环境覆盖 |
 
-演示账户来自可选的 `database/demo-data.sql`，不由应用启动创建。真实本地配置位于 `backend/config/application-local.yml`，示例可提交，真实文件不提交、不打包；从 backend 工作目录读取外部配置。业务时区、业务缓存、CORS 和前端配置仍为规划项。
+演示账户来自可选的 `database/demo-data.sql`，不由应用启动创建。真实本地配置位于 `backend/config/application-local.yml`，示例可提交，真实文件不提交、不打包；从 backend 工作目录读取外部配置。业务时区已接入；业务缓存、CORS 和前端配置仍为规划项。
 
 配置由运行环境注入，命令行和 IDEA 配置方式见 [README](README.md)。仓库只提供不含真实凭证的配置示例。
 

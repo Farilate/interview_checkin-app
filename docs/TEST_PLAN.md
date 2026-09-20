@@ -112,17 +112,17 @@
 
 | 测试集 | 数量 | 验证范围 | 最近记录 |
 | --- | --- | --- | --- |
-| ApiContractTest | 58 | 随机端口真实 HTTP；统一响应、参数校验、JSON 严格解析、错误码、404/405/406/415、no-store 和安全错误消息 | Java 21 下 verify 通过 |
+| ApiContractTest | 59 | 随机端口真实 HTTP；统一响应、参数校验、JSON 严格解析、错误码、404/405/406/415、no-store 和安全错误消息 | Java 21 下 verify 通过 |
 | AuthRepairTest | 9 | 凭证边界、真实 BCrypt、大整数字符串 ID、请求身份及已删除用户会话清理 | Java 21 下 verify 通过 |
 | SessionServiceTest | 13 | 摘要键、固定 TTL 调用、不续期、无效身份值、非法 TTL 和 Redis 故障分类 | Java 21 下 verify 通过 |
 | AuthControllerTest | 8 | 生产认证组件的 MVC 登录、当前用户、登出、重复登出、多会话隔离及 50301 响应 | Java 21 下 verify 通过 |
 | DemoDataTest | 1 | 生产 BCrypt 编码器验证公开演示 SQL 哈希，SQL 不含明文密码 | Java 21 下 clean verify 验证 |
-| HabitContractTest | 70 | 随机端口真实 HTTP；生产 Habit Controller/Service、鉴权配置、创建校验、重名、用户隔离、分页和故障分类；Mapper/认证依赖使用替身 | 本轮 verify 通过 |
+| HabitContractTest | 74 | 随机端口真实 HTTP；生产 Habit Controller/Service、鉴权配置、创建校验、重名、用户隔离、分页和故障分类；Mapper/认证依赖使用替身 | 本轮 verify 通过 |
 | CheckinRecordServiceTest | 17 | 单次取时、重复键回查、created 标记、空历史/今天/昨天锚点/断签/跨月跨年闰日/400 天序列/午夜切换 | 本轮定向测试通过 |
 | CheckinConcurrencyIT | 1 | 真实 MySQL、固定 Clock、10 个并发 Service 调用；一次创建、同一记录、数据库一条、毫秒时间一致；定向清理数据 | 本轮通过 |
 | PersistenceIT | 10 | 真实 MySQL 中三个 Mapper、字段映射、分页、用户隔离、用户名/习惯名唯一、打卡唯一及复合外键 | 本轮 -Pmysql-it verify 重跑通过 |
 
-本轮 Java 21.0.12.1 / Maven 3.9.11 / Spring Boot 4.1.1 执行 -Pmysql-it verify：普通测试 176 项，真实 MySQL 集成 11 项，合计 187 项，0 失败、0 错误、0 跳过，打包成功。Surefire 和 Failsafe 报告分别位于 backend/target/surefire-reports/ 与 failsafe-reports/。HTTP 测试使用外部存储替身；真实并发测试通过生产 Service 和 Mapper 访问 MySQL，仅替换 Clock。
+2026-09-20，Java 21.0.12.1 / Maven 3.9.11 / Spring Boot 4.1.1：先执行 clean verify，Surefire 181 项通过且未运行真实 MySQL 测试；再执行 -Pmysql-it clean verify，Surefire 181 项和 Failsafe 11 项全部通过，合计 192 项，0 失败、0 错误、0 跳过，两次打包均成功。报告分别位于 backend/target/surefire-reports/ 与 failsafe-reports/。HTTP 测试使用存储替身；真实并发测试通过生产 Service 和 Mapper 访问 MySQL，仅替换 Clock。
 
 MySQL Server 具体版本缺少 SELECT VERSION() 证据，已移除原具体数字；下次真实联调查询后记录。PersistenceIT 的最近记录使用隔离 MySQL 测试实例及专用空库，执行 `-Pmysql-it clean verify`。10 项持久层测试通过，结束后独立查询三表行数均为 0，测试事务已回滚。当前规则为不同用户允许同名、同一用户名称唯一；PersistenceIT 本身不包含多线程并发；新增 CheckinConcurrencyIT 已验证真实 MySQL 的 Service 并发。报告目录为 `backend/target/failsafe-reports/`，构建产物可能被后续 clean 清理。
 
@@ -161,7 +161,7 @@ Habit 创建、去重和分页接口已实现并补测，真实存储接口验�
 
 ## 11. 可选加分项：用户注册验收（主线完成后最后做）
 
-注册不属于主线必做验收；Phase 1–11 主线功能、联调、必做测试及演示准备全部完成后，才按单独授权最后实施。未实现注册不影响主线交付。以下仅为选择实施加分项后的验收计划，不计入普通测试集（现有 176 项）；实施前先确定开放范围、成功响应、用户名冲突业务码及是否自动登录。
+注册不属于主线必做验收；Phase 1–11 主线功能、联调、必做测试及演示准备全部完成后，才按单独授权最后实施。未实现注册不影响主线交付。以下仅为选择实施加分项后的验收计划，不计入现有测试集；实施前先确定开放范围、成功响应、用户名冲突业务码及是否自动登录。
 
 | 场景 | 计划验收要求 |
 | --- | --- |
@@ -179,7 +179,7 @@ Habit 创建、去重和分页接口已实现并补测，真实存储接口验�
 注册实现时再新增测试代码，现阶段不调整既有测试数量或执行结果。
 ## 12. Habit 创建、去重与分页回归
 
-HabitContractTest 共 70 项：原 Habit 创建/分页 43 项、打卡提交 18 项、今日状态/连续天数 HTTP 查询 9 项。使用随机端口和生产 Controller、Service、鉴权、JSON 与异常配置，仅替换存储和 Clock。全量结果见第 9 节。
+HabitContractTest 共 74 项：原 Habit 创建/分页 43 项、打卡提交 16 项、今日状态/连续天数 HTTP 查询 9 项、三个接口的非正数 ID 边界 6 项。使用随机端口和生产 Controller、Service、鉴权、JSON 与异常配置，仅替换存储和 Clock。全量结果见第 9 节。
 
 覆盖：
 
@@ -214,4 +214,14 @@ CheckinConcurrencyIT 使用真实 Service、Mapper 和 MySQL，以固定 Clock �
 
 测试为每次运行创建独立随机用户。清理覆盖数据准备失败情形；只有工作线程终止后，才按本次用户名依次删除打卡记录、习惯、用户，避免遗留记录或影响已有数据。若线程无法终止，则失败并保留数据供排查，不一边写一边删。PersistenceIT 仍使用各测例事务回滚。
 
-本轮这两组真实 MySQL 测试共 11 项通过。它们不等于 HTTP + Redis 认证端到端并发；该链路及 H5 联调仍待验收。今日状态与连续天数当前直接查询 MySQL，Redis 业务缓存未实现。非正数 habitId 当前返回 40401，本轮未修改该业务行为。
+本轮这两组真实 MySQL 测试共 11 项通过。它们不等于 HTTP + Redis 认证端到端并发；该链路及 H5 联调仍待验收。今日状态与连续天数当前直接查询 MySQL，Redis 业务缓存未实现。三个 habitId 路径已添加 @Positive：0/负数返回 40001，合法正整数但不存在或无权访问仍返回 40401。
+
+## 15. Phase 6/7 收尾配置与参数校验
+
+删除 application.yml 对本机 local 文件的显式 import，保留 Spring Boot profile 和外部 config 默认搜索机制。ApiContractTest 新增配置来源检查，test profile 下不得包含 application-local 配置源，不输出敏感配置值。业务时区统一 APP_BUSINESS_ZONE，默认 Asia/Shanghai。
+
+三个路径通过 MVC @Positive 校验 0/负数，新增六项参数化测试，断言 40001 且不调用 Habit/Checkin Mapper；保留合法 ID 不存在/无权访问的 40401 测试及非数字/溢出 40001 测试。未添加类级 @Validated 或新过滤器。
+
+并发测试已恢复 CheckinConcurrencyIT 命名，测试逻辑不变，与 PersistenceIT 一起仅由 mysql-it 的 Failsafe 执行；普通 clean verify 不访问真实 MySQL。缓存字段调整仅限 DATABASE.md 的 Phase 8 设计文字，没有新增缓存代码。
+
+本轮验证结果：ApiContractTest 59 项、HabitContractTest 74 项、CheckinRecordServiceTest 17 项均通过；既有认证、会话、演示数据、真实 MySQL 并发和持久层测试也全部通过，共 192 项。没有执行 H5 或 HTTP + Redis 认证端到端并发验收。

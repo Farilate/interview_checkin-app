@@ -29,15 +29,12 @@ spring:
       port: ${REDIS_PORT:6379}
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
-  config:
-    import:
-      - optional:file:./config/application-local.yml
-      - optional:file:./backend/config/application-local.yml
 
 app:
   session:
     ttl-seconds: ${SESSION_TTL_SECONDS:7200}
-  business-zone: ${BUSINESS_ZONE:Asia/Shanghai}
+  # 已实现的打卡、今日状态及连续天数统一使用该业务时区。
+  business-zone: ${APP_BUSINESS_ZONE:Asia/Shanghai}
 
 mybatis:
   configuration:

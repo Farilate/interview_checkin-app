@@ -99,8 +99,8 @@ checkin:v1
 | 用途与 Key | Value | TTL | 写入时机 | 删除/更新时机 | Miss 处理 |
 | --- | --- | --- | --- | --- | --- |
 | 登录态 `checkin:v1:session:{tokenSha256}` | 当前实现：十进制用户 ID 字符串，如 `1`，不是 JSON | 默认 7200 秒，固定过期，读取不续期 | 用户名密码验证成功后，同时写入值和 TTL；写入成功才返回 Token | 自动过期；登出、用户不存在或身份值损坏时删除当前会话键 | 不能从 MySQL 恢复原 Session；返回 401，用户重新登录 |
-| 今日状态 `checkin:v1:today:{uid}:{hid}:{D}` | JSON：date、checkedIn、recordId、checkedInAt | 默认 30 秒，且不得跨到下一个业务日继续使用 | 查询 Miss 后从 MySQL 回源并写入 | 打卡事务提交后删除；读取不续期 | 查询 MySQL 恢复真实状态 |
-| 连续天数 `checkin:v1:streak:{uid}:{hid}:{D}` | JSON：asOfDate、streakDays、streakEndDate | 默认 30 秒，且不得跨到下一个业务日继续使用 | 查询 Miss 后从 MySQL 计算并写入 | 打卡事务提交后删除；读取不续期 | 从 MySQL 倒序读取并重算 |
+| 今日状态 `checkin:v1:today:{uid}:{hid}:{D}` | 今日查询结果，核心语义 checkedIn；序列化格式在 Phase 8 实施前确定 | 默认 30 秒，且不得跨到下一个业务日继续使用 | 查询 Miss 后从 MySQL 回源并写入 | 打卡事务提交后删除；读取不续期 | 查询 MySQL 恢复真实状态 |
+| 连续天数 `checkin:v1:streak:{uid}:{hid}:{D}` | 连续天数查询结果，核心语义 streak；序列化格式在 Phase 8 实施前确定 | 默认 30 秒，且不得跨到下一个业务日继续使用 | 查询 Miss 后从 MySQL 计算并写入 | 打卡事务提交后删除；读取不续期 | 从 MySQL 倒序读取并重算 |
 
 登录态放 Redis 是为了服务端认证和集中失效；今日状态和连续天数放 Redis 是为了减少重复查询。所有真实业务记录始终保存在 MySQL。
 

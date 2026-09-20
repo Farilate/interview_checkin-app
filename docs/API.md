@@ -243,7 +243,7 @@ Response：HTTP 200。
 业务日期由可注入 Clock 的时区确定，TimeConfig 默认 Asia/Shanghai，可通过 app.business-zone（环境变量 APP_BUSINESS_ZONE）配置；有业务数据后不能随意改变时区。时间按 UTC 毫秒保存，与 DATETIME(3) 对齐。ID 按字符串返回。
 
 - 缺少或失效令牌：40101。
-- habitId 非数字或超出 long 范围：40001；当前未声明正数校验，0/负数按查询不到习惯返回 40401。
+- habitId 为 0、负数、非数字或超出 long 范围：40001，在访问业务 Mapper 前拒绝。
 - 习惯不存在或属于他人：40401，不访问打卡记录。
 - 数据库连接故障：50302；其他未分类数据异常：50001。
 - 已存在同日记录：直接返回，不再次插入；插入发生 DuplicateKeyException 后按当前用户、习惯、日期回查，找到则返回原记录，查不到则继续抛出原异常，不能伪装成功。
@@ -286,7 +286,7 @@ HTTP 200，当前响应只包含 streak：
 
 无记录返回 streak=0。字段名是 streak，当前不返回原设计的 streakDays、streakEndDate、asOfDate、habitId 或 businessZone。
 
-两个 GET 均设置 Cache-Control: no-store；缺少/失效令牌返回 40101，习惯不存在或属于他人返回 40401。非法数字或 long 溢出返回 40001；非正数 ID 当前查无记录返回 40401。数据库故障按统一分类返回错误，不能伪装为 false 或 0。当前查询直接访问 MySQL，尚未接入 Redis today/streak 缓存。
+两个 GET 均设置 Cache-Control: no-store；缺少/失效令牌返回 40101，习惯不存在或属于他人返回 40401。0、负数、非数字或 long 溢出均返回 40001；合法正整数但资源不存在/无权访问仍返回 40401。数据库故障按统一分类返回错误，不能伪装为 false 或 0。当前查询直接访问 MySQL，尚未接入 Redis today/streak 缓存。
 
 ## 8. 前端消费约定
 

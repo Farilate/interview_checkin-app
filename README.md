@@ -54,6 +54,7 @@ IDEA：将 `backend/pom.xml` 添加为 Maven 项目，项目 SDK、Maven 导入�
 | `SERVER_PORT`       | `8080`          | HTTP 监听端口                                        |
 | `REDIS_HOST` | `localhost` | 登录会话 Redis 地址 |
 | `REDIS_PORT` | `6379` | Redis 端口 |
+| `APP_BUSINESS_ZONE` | `Asia/Shanghai` | 已接入 app.business-zone，打卡日期、今日状态和连续天数统一使用 |
 | `SESSION_TTL_SECONDS` | `7200` | 会话固定有效期，单位秒，应为正数；读取不续期 |
 | `SPRING_PROFILES_ACTIVE` | `local` | 当前默认加载 local 配置，可由运行环境覆盖 |
 
@@ -68,7 +69,7 @@ Redis 地址和 Session TTL 已接入。Redis 认证及库编号可通过 Spring
 
 真实本地配置放在 `backend/config/application-local.yml`，不再放进 `src/main/resources/`。可复制 [配置示例](backend/config/application-local.example.yml) 后填写；真实文件由 Git 忽略，也不参与 Maven 打包。示例通过 `${DB_PASSWORD}` 引用环境变量；个人 local 文件也可以直接填写 `spring.datasource.password`，但不得提交或分发。若要用环境变量强制覆盖 local 中的直接配置，使用 `SPRING_DATASOURCE_PASSWORD`。应用启动不创建用户，原演示初始化配置已取消。
 
-启动 Maven、JAR 或 IDEA 时均以 `backend/` 为工作目录，Spring Boot 读取外部 `./config/`。若必须从仓库根目录启动，可设置 `SPRING_CONFIG_ADDITIONAL_LOCATION=optional:file:./backend/config/`。复制示例后填写数据库配置，或继续使用环境变量。打包分发时仅分发 JAR 与无秘密示例，不包含真实本地配置。
+启动 Maven、JAR 或 IDEA 时均以 `backend/` 为工作目录，Spring Boot 按激活的 profile 从默认搜索路径读取外部 `./config/`，application.yml 不再显式导入 local 文件；test profile 不加载 application-local.yml。若必须从仓库根目录启动，可设置 `SPRING_CONFIG_ADDITIONAL_LOCATION=optional:file:./backend/config/`。复制示例后填写数据库配置，或继续使用环境变量。打包分发时仅分发 JAR 与无秘密示例，不包含真实本地配置。
 
 ## 演示账户准备
 
@@ -131,7 +132,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 .\mvnw.cmd -B -ntp -Pmysql-it clean verify
 ```
 
-普通 `clean verify` 执行 58 项公共 HTTP 契约检查、30 项认证回归、1 项演示哈希验证和 70 项 Habit/打卡 HTTP 回归和 17 项打卡 Service/连续天数回归（共 176 项）并打包，不执行 `PersistenceIT` 或 `CheckinConcurrencyIT`；报告位于 `backend/target/surefire-reports/`。启用 `mysql-it` 后额外运行 10 项真实 MySQL 持久层测试和 1 项 10 线程并发测试，报告位于 `backend/target/failsafe-reports/`。
+普通 `clean verify` 由 Surefire 执行 181 项回归并打包，不执行真实 MySQL 测试。启用 mysql-it 后，Failsafe 额外执行 PersistenceIT（10 项）和 CheckinConcurrencyIT（1 项真实 MySQL 10 线程并发）。报告分别位于 backend/target/surefire-reports/ 与 failsafe-reports/。
 
 持久层测试覆盖三个 Mapper、字段映射、分页、用户隔离、用户名唯一、同用户习惯名称唯一、跨用户同名允许、打卡唯一和复合外键，不代表业务接口或 HTTP 并发验收已完成。应用启动不再执行账户写入，测试仍必须指向专用测试库。
 
@@ -150,7 +151,7 @@ userId。登录已执行用户名 trim 及小写规范化；用户名限制为 3
 
 ## 验证结果与限制
 
-2026-09-19，Java 21.0.12.1 / Maven 3.9.11 执行 -Pmysql-it verify：176 项普通测试及 11 项真实 MySQL 集成测试全部通过，合计 187 项，0 失败、0 错误、0 跳过，打包成功。普通测试含 70 项 Habit/打卡 HTTP 回归与 17 项 Service/连续天数回归。
+2026-09-20，Java 21.0.12.1 / Maven 3.9.11 实际执行 clean verify：181 项通过；随后执行 -Pmysql-it clean verify：Surefire 181 项、Failsafe 11 项，合计 192 项，0 失败、0 错误、0 跳过，两次打包均成功。包含 59 项公共 HTTP 契约、74 项 Habit/打卡 HTTP、17 项 Service/连续天数测试。
 
 真实 MySQL 并发测试确认 10 个 Service 调用仅一次 created=true、返回同一记录且数据库只有一条；固定 Clock 防止跨午夜干扰，测试结束仅清理本次随机用户数据。这不替代 HTTP + Redis 鉴权端到端并发验收。真实 MySQL/Redis 登录联调、实际会话到期、断网故障、演示 SQL 实际导入和 H5 尚未验收，阶段 4 因此尚未完成全部验收。CORS 留待 H5 联调阶段处理。
 
